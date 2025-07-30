@@ -32,10 +32,6 @@ set(MUJOCO_SDF_SRCS
     sdflib.h
     torus.cc
     torus.h
-    SimpleBox.cc
-    SimpleBox.h
-    SimpleSphere.cc
-    SimpleSphere.h
 )
 
 add_library(sdf_plugin SHARED)

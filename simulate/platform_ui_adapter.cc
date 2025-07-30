@@ -17,20 +17,14 @@
 #include <chrono>
 
 namespace mujoco {
-
-// Constructor: Initializes the MuJoCo rendering context to default values.
 PlatformUIAdapter::PlatformUIAdapter() {
   mjr_defaultContext(&con_);
 }
 
-// Frees the MuJoCo rendering context resources.
-// Call this when the context is no longer needed (e.g., on shutdown).
 void PlatformUIAdapter::FreeMjrContext() {
   mjr_freeContext(&con_);
 }
 
-// Refreshes (recreates) the MuJoCo rendering context if the model or font scale has changed.
-// Returns true if the context was recreated, false otherwise.
 bool PlatformUIAdapter::RefreshMjrContext(const mjModel* m, int fontscale) {
   if (m != last_model_ || fontscale != last_fontscale_) {
     mjr_makeContext(m, &con_, fontscale);
@@ -41,50 +35,44 @@ bool PlatformUIAdapter::RefreshMjrContext(const mjModel* m, int fontscale) {
   return false;
 }
 
-// Ensures the rendering context matches the required size.
-// This is a stub in this implementation and always returns false.
 bool PlatformUIAdapter::EnsureContextSize() {
   return false;
 }
 
-// Handles file drop events (e.g., when files are dragged and dropped onto the window).
-// Updates the UI state and triggers the event callback if set.
 void PlatformUIAdapter::OnFilesDrop(int count, const char** paths) {
   state_.type = mjEVENT_FILESDROP;
   state_.dropcount = count;
   state_.droppaths = paths;
 
-  // Application-specific processing via callback
+  // application-specific processing
   if (event_callback_) {
     event_callback_(&state_);
   }
 
-  // Clean up: we don't own the paths pointer, so reset it
+  // remove paths pointer from mjuiState since we don't own it
   state_.dropcount = 0;
   state_.droppaths = nullptr;
 }
 
-// Handles keyboard events.
-// Translates the platform-specific key code, updates the UI state, and triggers the event callback.
 void PlatformUIAdapter::OnKey(int key, int scancode, int act) {
-  // Translate API-specific key code to MuJoCo key code
+  // translate API-specific key code
   int mj_key = TranslateKeyCode(key);
 
-  // Only handle key down events
+  // release: nothing to do
   if (!IsKeyDownEvent(act)) {
     return;
   }
 
-  // Update UI state with current modifiers and mouse state
+  // update state
   UpdateMjuiState();
 
-  // Set key event info
+  // set key info
   state_.type = mjEVENT_KEY;
   state_.key = mj_key;
   state_.keytime = std::chrono::duration<double>(
       std::chrono::steady_clock::now().time_since_epoch()).count();
 
-  // Application-specific processing via callback
+  // application-specific processing
   if (event_callback_) {
     event_callback_(&state_);
   }
@@ -92,16 +80,14 @@ void PlatformUIAdapter::OnKey(int key, int scancode, int act) {
   last_key_ = mj_key;
 }
 
-// Handles mouse button events (press/release).
-// Translates the button, updates the UI state, handles double-clicks and dragging, and triggers the event callback.
 void PlatformUIAdapter::OnMouseButton(int button, int act)  {
-  // Translate API-specific mouse button code to MuJoCo button
+  // translate API-specific mouse button code
   mjtButton mj_button = TranslateMouseButton(button);
 
-  // Update UI state with current modifiers and mouse state
+  // update state
   UpdateMjuiState();
 
-  // Swap left and right buttons if Alt is pressed
+  // swap left and right if Alt
   if (state_.alt) {
     if (mj_button == mjBUTTON_LEFT) {
       mj_button = mjBUTTON_RIGHT;
@@ -110,50 +96,49 @@ void PlatformUIAdapter::OnMouseButton(int button, int act)  {
     }
   }
 
-  // Handle button press
+  // press
   if (IsMouseButtonDownEvent(act)) {
     double now = std::chrono::duration<double>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
 
-    // Detect double-click (within 250 ms)
+    // detect doubleclick: 250 ms
     if (mj_button == state_.button && now - state_.buttontime < 0.25) {
       state_.doubleclick = 1;
     } else {
       state_.doubleclick = 0;
     }
 
-    // Set press event info
+    // set info
     state_.type = mjEVENT_PRESS;
     state_.button = mj_button;
     state_.buttontime = now;
 
-    // Start dragging if mouse is over a rectangle
+    // start dragging
     if (state_.mouserect) {
       state_.dragbutton = state_.button;
       state_.dragrect = state_.mouserect;
     }
   }
-  // Handle button release
+
+  // release
   else {
     state_.type = mjEVENT_RELEASE;
   }
 
-  // Application-specific processing via callback
+  // application-specific processing
   if (event_callback_) {
     event_callback_(&state_);
   }
 
-  // Stop dragging after release
+  // stop dragging after application processing
   if (state_.type == mjEVENT_RELEASE) {
     state_.dragrect = 0;
     state_.dragbutton = 0;
   }
 }
 
-// Handles mouse movement events while a button is pressed.
-// Updates the UI state and triggers the event callback.
 void PlatformUIAdapter::OnMouseMove(double x, double y) {
-  // Ignore if no mouse buttons are pressed
+  // no buttons down: nothing to do
   if (!state_.left && !state_.right && !state_.middle) {
     return;
   }
