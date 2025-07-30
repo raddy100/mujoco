@@ -1,0 +1,45 @@
+<mujoco>
+  <extension>
+    <plugin plugin="mujoco.sdf.simplebox">
+      <instance name="simplebox">
+        <config key="sizex" value="10.5"/>
+        <config key="sizey" value="10.5"/>
+        <config key="sizez" value="10.5"/>
+      </instance>
+    </plugin>
+  </extension>
+
+  <option sdf_iterations="5" sdf_initpoints="20"/>
+
+  <default>
+    <geom solref="0.01 1" solimp=".95 .99 .0001" friction="0.2"/>
+  </default>
+
+  <statistic meansize=".1"/>
+
+  <asset>
+    <mesh name="boxmesh">
+      <plugin instance="simplebox"/>
+    </mesh>
+  </asset>
+
+  <include file="scene.xml"/>
+
+  <worldbody>
+    <body pos="0 0 2">
+      <freejoint/>
+      <geom type="sdf" mesh="boxmesh" rgba="0.8 0.3 0.3 1">
+        <plugin instance="simplebox"/>
+      </geom>
+    </body>
+
+    <body pos="1 0 13" >
+        <freejoint/>
+        <geom type="sdf" mesh="boxmesh" rgba="0.1 0.6 0.5 1">
+          <plugin instance="simplebox"/>
+        </geom>
+    </body>
+
+    <light pos="0 0 3" dir="0 0 -1"/>
+  </worldbody>
+</mujoco>

@@ -18,15 +18,19 @@
 #include "nut.h"
 #include "torus.h"
 #include "sdflib.h"
+#include "SimpleBox.h"  // Ensure the correct header file for SimpleBox is included
+#include "SimpleSphere.h"  // Ensure the correct header file for SimpleSphere is included
 
 namespace mujoco::plugin::sdf {
-
+	 
 mjPLUGIN_LIB_INIT {
   Bolt::RegisterPlugin();
   Bowl::RegisterPlugin();
   Gear::RegisterPlugin();
   Nut::RegisterPlugin();
   Torus::RegisterPlugin();
+  SimpleBox::RegisterPlugin();  // Ensure SimpleBox is a valid class or namespace
+  SimpleSphere::RegisterPlugin();  // Ensure SimpleSphere is a valid class or namespace
   SdfLib::RegisterPlugin();
 }
 
