@@ -96,27 +96,54 @@ static inline double CurrentGap() {
 // and return true.
 static bool LoopContactCheck(std::string& outTargetBodyName) {
  outTargetBodyName.clear();
- if (!g_lastBody || !g_probeRect) return false;
+ if (!g_lastBody || !m || !d) return false;
 
- // ensure probe is active and collisions are up-to-date
- if (g_probeRect->contype ==0 && g_probeRect->conaffinity ==0) {
- g_probeRect->contype =4;
- g_probeRect->conaffinity =1;
- }
+ // fast path: avoid broad collision detection and use world-position proximity
+ // compute the expected neighbor position one "step" away from the last body
+ int axisIdx =0, sign = +1;
+ FaceToAxisSign(g_spawnFace, axisIdx, sign);
 
+ const double boxEdge =2.0 * kBoxHalf;
+ const double gap = CurrentGap();
+ const double step = boxEdge + gap; // center-to-center distance for adjacent cubes
+
+ // ensure kinematics are up to date (cheap compared to full mj_collision)
  mj_kinematics(m, d);
- mj_collision(m, d);
 
- int hitBodyId = ProbeGetHitBodyId();
- if (hitBodyId <0) return false;
+ // get last body's world position
+ const int lastId = mj_name2id(m, mjOBJ_BODY, g_chain.empty() ? "" : g_chain.back().name.c_str());
+ if (lastId <0) return false;
+ const double* lastPos = d->xpos +3*lastId;
 
- if (const char* hitName = mj_id2name(m, mjOBJ_BODY, hitBodyId)) {
- outTargetBodyName = hitName;
- std::cout << "LoopContactCheck: hit body " << hitBodyId
- << " name=" << outTargetBodyName << "\n";
+ // expected target position along spawn axis
+ double tgtPos[3] = { lastPos[0], lastPos[1], lastPos[2] };
+ tgtPos[axisIdx] += sign * step;
+
+ // tolerances: allow some slack to account for accumulated moves
+ const double epsAxis =1e-6; // along-axis closeness to the expected center
+ const double epsOther =0.25 * kBoxHalf; // across-axis tolerance (quarter cube width)
+
+ // scan existing cubes for a body whose center matches the expected neighbor slot
+ for (const auto& e : g_chain) {
+ if (!e.specBody) continue;
+ if (e.specBody == g_lastBody) continue;
+
+ const int bid = mj_name2id(m, mjOBJ_BODY, e.name.c_str());
+ if (bid <0) continue;
+ const double* p = d->xpos +3*bid;
+
+ double daxis = std::fabs(p[axisIdx] - tgtPos[axisIdx]);
+ double d1 = std::fabs(p[(axisIdx+1)%3] - tgtPos[(axisIdx+1)%3]);
+ double d2 = std::fabs(p[(axisIdx+2)%3] - tgtPos[(axisIdx+2)%3]);
+
+ if (daxis <= epsAxis && d1 <= epsOther && d2 <= epsOther) {
+ outTargetBodyName = e.name;
+ std::cout << "LoopContactCheck(fast): target body name=" << outTargetBodyName << "\n";
+ return true;
+ }
  }
 
- return true;
+ return false;
 }
 
 // Create the equality constraints to close a loop between the previous body/new
@@ -642,7 +669,9 @@ void spawnCube() {
  }
 
  g_lastBody = body;
- g_chain.push_back(ChainEntry{body, bodyName, -1, spawnAxis, spawnSign});
+ // distanceFactor is2 when obstructed loop placement occurred, else1
+ int distFactor = obstructed ?2 :1;
+ g_chain.push_back(ChainEntry{body, bodyName, -1, spawnAxis, spawnSign, distFactor});
 
  int old_nv = m->nv, old_na = m->na;
  if (mj_recompile(spec, nullptr, m, d) !=0) {
@@ -975,9 +1004,17 @@ static void ReconstructChainFromSpec() {
 
  entry.axis = axis;
  entry.sign = sign;
+
+ // infer distanceFactor: compare |pos| to (boxEdge + gap) within tolerance
+ const double boxEdge =2.0 * kBoxHalf;
+ const double gap = CurrentGap();
+ const double unit = (boxEdge + gap);
+ double posMag = std::fabs(axis==0?cur->pos[0]:(axis==1?cur->pos[1]:cur->pos[2]));
+ entry.distanceFactor = (posMag >1.5 * unit) ?2 :1; //2x when loop spacing
  } else {
  entry.axis = -1;
  entry.sign = +1;
+ entry.distanceFactor =1;
  }
 
  g_chain.push_back(entry);

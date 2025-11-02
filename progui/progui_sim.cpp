@@ -235,7 +235,7 @@ static void ApplyGapToChainLayout()
         return;
     const double boxEdge = 2.0 * kBoxHalf;
     const double gap = g_gapRatio * boxEdge;
-    // update positions for all non-root bodies using stored axis/sign
+    // update positions for all non-root bodies using stored axis/sign and distanceFactor
     if (g_chain.size() <= 1)
         return;
     for (size_t i = 1; i < g_chain.size(); ++i)
@@ -246,10 +246,11 @@ static void ApplyGapToChainLayout()
             continue;
         const int axis = e.axis;
         const int sign = e.sign;
+        const int factor = e.distanceFactor <= 0 ? 1 : e.distanceFactor;
         b->pos[0] = 0.0;
         b->pos[1] = 0.0;
         b->pos[2] = 0.0;
-        double off = sign * (boxEdge + gap);
+        double off = sign * factor * (boxEdge + gap);
         if (axis == 0)
             b->pos[0] = off;
         else if (axis == 1)

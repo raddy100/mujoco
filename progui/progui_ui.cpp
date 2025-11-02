@@ -125,34 +125,36 @@ void keyboard(GLFWwindow *window, int key, int scancode, int act, int mods)
 
     if (act == GLFW_PRESS)
     {
-        if (key == GLFW_KEY_1)
+        // Arrow keys control ghost probe box directions
+        if (key == GLFW_KEY_RIGHT)
         {
             g_spawnFace = FACE_POSX;
             UpdateMarkerOnLastBody();
             return;
         }
 
-        if (key == GLFW_KEY_2)
+        if (key == GLFW_KEY_LEFT)
         {
             g_spawnFace = FACE_NEGX;
             UpdateMarkerOnLastBody();
             return;
         }
 
-        if (key == GLFW_KEY_3)
+        if (key == GLFW_KEY_UP)
         {
             g_spawnFace = FACE_POSY;
             UpdateMarkerOnLastBody();
             return;
         }
 
-        if (key == GLFW_KEY_4)
+        if (key == GLFW_KEY_DOWN)
         {
             g_spawnFace = FACE_NEGY;
             UpdateMarkerOnLastBody();
             return;
         }
 
+        // keep Z-axis mappings on 5 and 6
         if (key == GLFW_KEY_5)
         {
             g_spawnFace = FACE_POSZ;
