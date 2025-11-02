@@ -42,6 +42,7 @@ struct ChainEntry
  int bodyId;
  int axis; // spawn axis this body was placed along relative to its parent
  int sign; // +1 or -1 direction along axis
+ int distanceFactor; //1 for normal spacing,2 for loop placement spacing
 };
 
 extern mjsBody *g_lastBody;
