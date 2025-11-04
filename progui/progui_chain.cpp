@@ -165,8 +165,6 @@ static bool LoopContactCheck(std::string& outTargetBodyName) {
  return false;
 }
 
-    return false;
-}
 
 // Create the equality constraints to close a loop between the previous body/new
 // body and the target body.
@@ -339,20 +337,7 @@ bool SaveDirectionsToFile(const char *filename)
     return true;
 }
 
-// New: write the direction history to a text file
-bool SaveDirectionsToFile(const char* filename) {
- const char* out = (filename && std::strlen(filename) >0) ? filename : "directions.txt";
- std::ofstream ofs(out, std::ios::out | std::ios::trunc);
- if (!ofs.is_open()) {
- std::cerr << "SaveDirectionsToFile: could not open file: " << out << "\n";
- return false;
- }
- for (const auto& dir : g_directionHistory) {
- ofs << dir << '\n';
- }
- std::cout << "Wrote " << g_directionHistory.size() << " directions to: " << out << "\n";
- return true;
-}
+
 
 static void UpdateProbeForFace() {
  if (!spec || !m || !d || !g_lastBody || !g_probeRect) return;
