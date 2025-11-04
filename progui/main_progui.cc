@@ -135,7 +135,7 @@ int main(int argc, const char **argv)
     ui.color.button[2] =0.95f;
 
     // Build defControl with global button names
-    mjuiDef defControl[9];
+    mjuiDef defControl[12];
     int di =0;
 
     // Section
@@ -167,6 +167,7 @@ int main(int argc, const char **argv)
     addButton(kBtnDecreaseGap);
     addButton(kBtnSaveChain);
     addButton(kBtnLoadChain);
+    addButton(kBtnPrintDirections);
 
     // terminator
     std::memset(&defControl[di],0, sizeof(mjuiDef));

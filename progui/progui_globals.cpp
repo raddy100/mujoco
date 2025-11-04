@@ -66,3 +66,75 @@ const char* kBtnSaveChain = "Save Chain (Ctrl+S)";
 const char* kBtnLoadChain = "Load Chain (Ctrl+L)";
 const char* kBtnSaveToFile = "Save To File";
 const char* kBtnLoadFromFile= "Load From File";
+const char* kBtnPrintDirections = "Print Directions";
+
+// Direction tracking
+std::vector<std::string> g_directionHistory;
+
+// Helpers to map faces to axis/sign
+static inline void FaceToAxisSignLocal(int face, int &axis, int &sign)
+{
+ switch (face)
+ {
+ case FACE_POSX: axis =0; sign = +1; break;
+ case FACE_NEGX: axis =0; sign = -1; break;
+ case FACE_POSY: axis =1; sign = +1; break;
+ case FACE_NEGY: axis =1; sign = -1; break;
+ case FACE_POSZ: axis =2; sign = +1; break;
+ case FACE_NEGZ: axis =2; sign = -1; break;
+ default: axis =0; sign = +1; break;
+ }
+}
+
+// Expose helper implementations declared in header
+void RecordTurnInput(int oldFace, int newFace)
+{
+ if (oldFace == newFace) return; // no change
+
+ int oldAxis, oldSign; FaceToAxisSignLocal(oldFace, oldAxis, oldSign);
+ int newAxis, newSign; FaceToAxisSignLocal(newFace, newAxis, newSign);
+
+ // If turning into Z, it's up/down based on the new sign
+ if (newAxis ==2)
+ {
+ g_directionHistory.push_back(newSign >0 ? "up" : "down");
+ return;
+ }
+
+ // If both in XY, classify left/right
+ if ((oldAxis !=2) && (newAxis !=2))
+ {
+ std::string dir;
+ if (oldAxis ==0 && newAxis ==1)
+ {
+ // X -> Y
+ int prod = oldSign * newSign;
+ dir = (prod >0) ? "left" : "right";
+ }
+ else if (oldAxis ==1 && newAxis ==0)
+ {
+ // Y -> X
+ int prod = oldSign * newSign;
+ dir = (prod >0) ? "right" : "left";
+ }
+ else
+ {
+ // same axis (including180 turn) or unsupported, ignore
+ return;
+ }
+ g_directionHistory.push_back(dir);
+ return;
+ }
+
+ // Leaving Z to XY: ambiguous left/right, ignore
+}
+
+void RecordForwardInput()
+{
+ g_directionHistory.push_back("forward");
+}
+
+void ClearDirectionHistory()
+{
+ g_directionHistory.clear();
+}

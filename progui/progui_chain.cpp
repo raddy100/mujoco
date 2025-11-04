@@ -6,6 +6,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <fstream>
 
 // -----------------------------------------------------------------------------
 // Globals / state
@@ -90,7 +91,7 @@ static inline double CurrentGap() {
 
 // -----------------------------------------------------------------------------
 // Loop utilities
-// -----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
 
 // Detect if the ghost probe hits an existing body. On hit, fill outTargetBodyName
 // and return true.
@@ -222,11 +223,51 @@ static void LoopCreate(int spawnAxis, int spawnSign,
  mjs_setName(eq2->element, ename2.c_str());
  }
  }
+
+ // Record loop location in direction history: label the chain index of the
+ // target body where the loop closes. Use1-based index for readability.
+ {
+ int targetIndex = -1;
+ for (size_t i =0; i < g_chain.size(); ++i) {
+ if (g_chain[i].name == targetBodyName) { targetIndex = static_cast<int>(i); break; }
+ }
+ if (targetIndex >=0) {
+ const int oneBased = targetIndex +1;
+ g_directionHistory.push_back(std::string("loop ") + std::to_string(oneBased));
+ }
+ }
 }
 
 // -----------------------------------------------------------------------------
 // Save/Load helpers
 // -----------------------------------------------------------------------------
+
+// utility: identify turn and loop tokens in history
+static inline bool IsTurnToken(const std::string& s) {
+ return (s == "left" || s == "right" || s == "up" || s == "down");
+}
+static inline bool IsLoopToken(const std::string& s) {
+ return s.rfind("loop ",0) ==0; // starts with "loop "
+}
+
+// When deleting the last cube, prune direction history to match remaining boxes.
+// Remove the trailing "forward" (for the deleted cube), then remove any trailing
+// loop labels and turn tokens that are no longer associated with a placement.
+static void PruneHistoryOnDelete() {
+ if (g_directionHistory.empty()) return;
+ // remove trailing forward corresponding to the deleted cube
+ if (g_directionHistory.back() == "forward") {
+ g_directionHistory.pop_back();
+ }
+ // remove any loop labels immediately preceding
+ while (!g_directionHistory.empty() && IsLoopToken(g_directionHistory.back())) {
+ g_directionHistory.pop_back();
+ }
+ // remove any turn tokens that came after the previous placement
+ while (!g_directionHistory.empty() && IsTurnToken(g_directionHistory.back())) {
+ g_directionHistory.pop_back();
+ }
+}
 
 // Save the current chain bodies' local positions (relative to their parents)
 void SaveChainPrePhysicsState() {
@@ -250,6 +291,21 @@ void SaveChainPrePhysicsState() {
  g_hasSavedPrePhysicsState = !g_savedPrePhysicsChain.empty();
  std::cout << "Saved pre-physics state for "
  << g_savedPrePhysicsChain.size() << " bodies\n";
+}
+
+// New: write the direction history to a text file
+bool SaveDirectionsToFile(const char* filename) {
+ const char* out = (filename && std::strlen(filename) >0) ? filename : "directions.txt";
+ std::ofstream ofs(out, std::ios::out | std::ios::trunc);
+ if (!ofs.is_open()) {
+ std::cerr << "SaveDirectionsToFile: could not open file: " << out << "\n";
+ return false;
+ }
+ for (const auto& dir : g_directionHistory) {
+ ofs << dir << '\n';
+ }
+ std::cout << "Wrote " << g_directionHistory.size() << " directions to: " << out << "\n";
+ return true;
 }
 
 static void UpdateProbeForFace() {
@@ -668,6 +724,11 @@ void spawnCube() {
  LoopCreate(spawnAxis, spawnSign, bodyName, targetBodyName);
  }
 
+ // record direction history: when we successfully spawn relative to a previous cube
+ if (g_lastBody) {
+ RecordForwardInput();
+ }
+
  g_lastBody = body;
  // distanceFactor is2 when obstructed loop placement occurred, else1
  int distFactor = obstructed ?2 :1;
@@ -696,6 +757,9 @@ void deleteLastCube() {
  std::cerr << "deleteLastCube: root cannot be deleted\n";
  return;
  }
+
+ // prune direction history to reflect the deletion
+ PruneHistoryOnDelete();
 
  ChainEntry last = g_chain.back();
  ChainEntry prev = g_chain[g_chain.size() -2];
@@ -907,20 +971,20 @@ bool SaveChainToFile(const char* filename) {
  int ok = -1;
 
  if (spec) {
-	 ok = mj_saveXML(spec, out, error, sizeof(error)); //0 on success
-	 if (ok ==0) {
-	 std::cout << "Saved chain to XML: " << out << "\n";
-	 return true;
+ ok = mj_saveXML(spec, out, error, sizeof(error)); //0 on success
+ if (ok ==0) {
+ std::cout << "Saved chain to XML: " << out << "\n";
+ return true;
  }
 
  std::cerr << "SaveChainToFile: mj_saveXML failed: " << error << "\n";
  return false;
  } else {
-	 // fallback: save from model using global spec inside xml_api
-	 int s = mj_saveLastXML(out, m, error, sizeof(error));
-	 if (s) {
-	 std::cout << "Saved chain to XML: " << out << "\n";
-	 return true;
+ // fallback: save from model using global spec inside xml_api
+ int s = mj_saveLastXML(out, m, error, sizeof(error));
+ if (s) {
+ std::cout << "Saved chain to XML: " << out << "\n";
+ return true;
  }
 
  std::cerr << "SaveChainToFile: mj_saveLastXML failed: " << error << "\n";
@@ -934,6 +998,7 @@ static void ReconstructChainFromSpec() {
  g_lastMarker = nullptr;
  g_probeRect = nullptr;
  g_probeName.clear();
+ ClearDirectionHistory();
 
  if (!spec) return;
 
@@ -947,15 +1012,15 @@ static void ReconstructChainFromSpec() {
  el; el = mjs_nextChild(world, el, /*recurse=*/0)) {
  // el should be a body element; keep a defensive check
  if (el->elemtype == mjOBJ_BODY) {
-	 mjsBody* b = mjs_asBody(el);
-	 (void)b; // not used now but kept for clarity
+ mjsBody* b = mjs_asBody(el);
+ (void)b; // not used now but kept for clarity
 
-	 const char* nm = mjs_getString(mjs_getName(el));
-		 if (nm && std::strncmp(nm, "cube_",5) ==0) {
-			 first = mjs_asBody(el);
-			 break;
-		 }
-	 }
+ const char* nm = mjs_getString(mjs_getName(el));
+ if (nm && std::strncmp(nm, "cube_",5) ==0) {
+ first = mjs_asBody(el);
+ break;
+ }
+ }
  }
 
  if (!first) {
@@ -1058,10 +1123,10 @@ bool LoadChainFromFile(const char* filename) {
 if (!filename || std::strlen(filename) ==0) return false;
 
  char error[1024] = {0};
-	 mjSpec* newspec = mj_parseXML(filename, nullptr, error, sizeof(error));
-	 if (!newspec) {
-	 std::cerr << "LoadChainFromFile: parse error: " << error << "\n";
-	 return false;
+ mjSpec* newspec = mj_parseXML(filename, nullptr, error, sizeof(error));
+ if (!newspec) {
+ std::cerr << "LoadChainFromFile: parse error: " << error << "\n";
+ return false;
  }
 
  // load persisted gap from parsed spec (before compile)
@@ -1069,18 +1134,18 @@ if (!filename || std::strlen(filename) ==0) return false;
 
  mjModel* newm = mj_compile(newspec, nullptr);
  if (!newm) {
-	 std::cerr << "LoadChainFromFile: compile error: "
-	 << mjs_getError(newspec) << "\n";
-	 mj_deleteSpec(newspec);
-	 return false;
+ std::cerr << "LoadChainFromFile: compile error: "
+ << mjs_getError(newspec) << "\n";
+ mj_deleteSpec(newspec);
+ return false;
  }
 
  mjData* newd = mj_makeData(newm);
  if (!newd) {
-	 std::cerr << "LoadChainFromFile: mj_makeData failed\n";
-	 mj_deleteModel(newm);
-	 mj_deleteSpec(newspec);
-	 return false;
+ std::cerr << "LoadChainFromFile: mj_makeData failed\n";
+ mj_deleteModel(newm);
+ mj_deleteSpec(newspec);
+ return false;
  }
 
  // swap in new globals
