@@ -225,8 +225,6 @@ static void ApplyGapToChainLayout()
         return;
     const double boxEdge = 2.0 * kBoxHalf;
     const double gap = g_gapRatio * boxEdge;
-    const double r_perp = std::sqrt(kBoxHalf * kBoxHalf + kBoxHalf * kBoxHalf);
-
     // update positions for all non-root bodies using stored axis/sign and distanceFactor
     if (g_chain.size() <= 1)
         return;
