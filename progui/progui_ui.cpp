@@ -3,6 +3,20 @@
 #include <cstring>
 #include <iostream>
 
+// Forward declarations to satisfy single-file checks
+void SaveChainPrePhysicsState();
+void ResetChainToSavedState();
+void UpdateMarkerOnLastBody();
+void spawnCube();
+void deleteLastCube();
+void IncreaseGap();
+void DecreaseGap();
+void EnablePhysicsForAll();
+void RecordTurnInput(int oldFace, int newFace);
+bool SaveChainToFile(const char* filename);
+bool LoadChainFromFile(const char* filename);
+bool SaveDirectionsToFile(const char* filename);
+
 // helper to append a character to filename buffer
 static void AppendCharToFilename(char c)
 {
@@ -128,28 +142,36 @@ void keyboard(GLFWwindow *window, int key, int scancode, int act, int mods)
         // Arrow keys control ghost probe box directions
         if (key == GLFW_KEY_RIGHT)
         {
-            g_spawnFace = FACE_POSX;
+            int newFace = FACE_POSX;
+            RecordTurnInput(g_spawnFace, newFace);
+            g_spawnFace = newFace;
             UpdateMarkerOnLastBody();
             return;
         }
 
         if (key == GLFW_KEY_LEFT)
         {
-            g_spawnFace = FACE_NEGX;
+            int newFace = FACE_NEGX;
+            RecordTurnInput(g_spawnFace, newFace);
+            g_spawnFace = newFace;
             UpdateMarkerOnLastBody();
             return;
         }
 
         if (key == GLFW_KEY_UP)
         {
-            g_spawnFace = FACE_POSY;
+            int newFace = FACE_POSY;
+            RecordTurnInput(g_spawnFace, newFace);
+            g_spawnFace = newFace;
             UpdateMarkerOnLastBody();
             return;
         }
 
         if (key == GLFW_KEY_DOWN)
         {
-            g_spawnFace = FACE_NEGY;
+            int newFace = FACE_NEGY;
+            RecordTurnInput(g_spawnFace, newFace);
+            g_spawnFace = newFace;
             UpdateMarkerOnLastBody();
             return;
         }
@@ -157,14 +179,18 @@ void keyboard(GLFWwindow *window, int key, int scancode, int act, int mods)
         // keep Z-axis mappings on 5 and 6
         if (key == GLFW_KEY_5)
         {
-            g_spawnFace = FACE_POSZ;
+            int newFace = FACE_POSZ;
+            RecordTurnInput(g_spawnFace, newFace);
+            g_spawnFace = newFace;
             UpdateMarkerOnLastBody();
             return;
         }
 
         if (key == GLFW_KEY_6)
         {
-            g_spawnFace = FACE_NEGZ;
+            int newFace = FACE_NEGZ;
+            RecordTurnInput(g_spawnFace, newFace);
+            g_spawnFace = newFace;
             UpdateMarkerOnLastBody();
             return;
         }
@@ -255,6 +281,11 @@ void mouse_button(GLFWwindow *window, int button, int act, int mods)
             else if (changed->type == mjITEM_BUTTON && std::strcmp(changed->name, kBtnLoadFromFile) ==0)
             {
                 LoadChainFromFile(g_ioFilename);
+            }
+            else if (changed->type == mjITEM_BUTTON && std::strcmp(changed->name, kBtnPrintDirections) ==0)
+            {
+                // write directions to a file next to the executable
+                SaveDirectionsToFile("directions.txt");
             }
         }
         return;

@@ -115,20 +115,6 @@ void moveLastCubeY(int dir);
 void moveLastCubeZ(int dir);
 void EnablePhysicsForAll();
 
-// Save/load full chain via XML spec
-bool SaveChainToFile(const char* filename);
-bool LoadChainFromFile(const char* filename);
-
-// New feature: save/restore chain state around physics start
-void SaveChainPrePhysicsState();
-void ResetChainToSavedState();
-
-// UI handlers
-void keyboard(GLFWwindow *window, int key, int scancode, int act, int mods);
-void mouse_button(GLFWwindow *window, int button, int act, int mods);
-void mouse_move(GLFWwindow *window, double xpos, double ypos);
-void scroll(GLFWwindow *window, double xoffset, double yoffset);
-
 // Global button labels to keep UI text and handlers in sync
 extern const char* kBtnSpawnCube;
 extern const char* kBtnStartPhysics;
@@ -140,3 +126,28 @@ extern const char* kBtnLoadChain;
 // Additional direct file actions used in handlers
 extern const char* kBtnSaveToFile;
 extern const char* kBtnLoadFromFile;
+// New: print directions button
+extern const char* kBtnPrintDirections;
+
+// Save/load full chain via XML spec
+bool SaveChainToFile(const char* filename);
+bool LoadChainFromFile(const char* filename);
+
+// New feature: save/restore chain state around physics start
+void SaveChainPrePhysicsState();
+void ResetChainToSavedState();
+
+// New feature: track direction inputs relative to previous block
+extern std::vector<std::string> g_directionHistory; // sequence of "forward/left/right/up/down"
+void RecordTurnInput(int oldFace, int newFace); // append left/right/up/down based on turn
+void RecordForwardInput(); // append forward on successful spawn relative to previous
+void ClearDirectionHistory(); // clear history (e.g., on load)
+
+// New utility: write direction history to a text file
+bool SaveDirectionsToFile(const char* filename);
+
+// UI handlers
+void keyboard(GLFWwindow *window, int key, int scancode, int act, int mods);
+void mouse_button(GLFWwindow *window, int button, int act, int mods);
+void mouse_move(GLFWwindow *window, double xpos, double ypos);
+void scroll(GLFWwindow *window, double xoffset, double yoffset);
