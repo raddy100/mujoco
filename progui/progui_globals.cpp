@@ -21,7 +21,6 @@ double lastx =0.0;
 double lasty =0.0;
 
 bool g_boxesCollide = false;
-int g_jointMode =1; // JOINT_BALL by default
 bool g_physicsEnabled = false;
 mjtNum g_savedGravity[3] = {0,0,0};
 
@@ -46,7 +45,7 @@ bool g_hasSavedPrePhysicsState = false;
 std::vector<SavedBodyPos> g_savedPrePhysicsChain;
 
 // Softer defaults: increase constraint time constant and reduce joint damping
-const double kHingeDamping =0.15; // was1.0
+const double kJointDamping =0.15; // was1.0
 const double kGeomMargin =0.001;
 const double kSolref[2] = {0.15,0.7}; // was {0.03,1.0}
 const double kSolimp[5] = {0.9,0.95,0.001,0.5,2.0};

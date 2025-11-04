@@ -216,16 +216,6 @@ static void RecomputeJointLimitsForChain()
             j->range[0] = 0.0;
             j->range[1] = phi;
         }
-        else if (j->type == mjJNT_HINGE)
-        {
-            double theta = std::atan2(std::max(1e-6, 0.5 * gap), std::max(1e-6, r_perp));
-            const double th_min = mjPI * 5.0 / 180.0;
-            const double th_max = mjPI * 80.0 / 180.0;
-            theta = std::max(th_min, std::min(th_max, theta));
-            j->limited = mjLIMITED_TRUE;
-            j->range[0] = -theta;
-            j->range[1] = +theta;
-        }
     }
 }
 
@@ -235,6 +225,8 @@ static void ApplyGapToChainLayout()
         return;
     const double boxEdge = 2.0 * kBoxHalf;
     const double gap = g_gapRatio * boxEdge;
+    const double r_perp = std::sqrt(kBoxHalf * kBoxHalf + kBoxHalf * kBoxHalf);
+
     // update positions for all non-root bodies using stored axis/sign and distanceFactor
     if (g_chain.size() <= 1)
         return;
@@ -258,7 +250,7 @@ static void ApplyGapToChainLayout()
         else
             b->pos[2] = off;
 
-        // update joint anchors on this body (if they exist) by name convention
+        // Recalculate angle limits for joints based on current gap, but do not move joint anchors
         // ball
         {
             std::string jn = e.name + "_ball";
@@ -267,41 +259,27 @@ static void ApplyGapToChainLayout()
                 mjsJoint *j = mjs_asJoint(jel);
                 if (j && j->type == mjJNT_BALL)
                 {
-                    double anchor[3] = {0, 0, 0};
-                    int faceAxis = axis, faceSign = sign;
-                    anchor[faceAxis] = -faceSign * (kBoxHalf + 0.5 * gap);
-                    j->pos[0] = anchor[0];
-                    j->pos[1] = anchor[1];
-                    j->pos[2] = anchor[2];
-                }
-            }
-        }
-        // hinges
-        {
-            std::string jx = g_chain[i].name + "_hinge_x";
-            if (mjsElement *jel = mjs_findElement(spec, mjOBJ_JOINT, jx.c_str()))
-            {
-                mjsJoint *j = mjs_asJoint(jel);
-                if (j && j->type == mjJNT_HINGE)
-                {
-                    double anchor[3] = {0, 0, 0};
-                    anchor[e.axis] = -e.sign * (kBoxHalf + 0.5 * gap);
-                    j->pos[0] = anchor[0];
-                    j->pos[1] = anchor[1];
-                    j->pos[2] = anchor[2];
-                }
-            }
-            std::string jy = g_chain[i].name + "_hinge_y";
-            if (mjsElement *jel = mjs_findElement(spec, mjOBJ_JOINT, jy.c_str()))
-            {
-                mjsJoint *j = mjs_asJoint(jel);
-                if (j && j->type == mjJNT_HINGE)
-                {
-                    double anchor[3] = {0, 0, 0};
-                    anchor[e.axis] = -e.sign * (kBoxHalf + 0.5 * gap);
-                    j->pos[0] = anchor[0];
-                    j->pos[1] = anchor[1];
-                    j->pos[2] = anchor[2];
+                    // compute allowable cone angle phi from gap
+                    const double a = kBoxHalf;
+                    const double c = 1.0 + (a > 0.0 ? (gap / a) : 0.0);
+                    double phi = 0.0;
+                    const double root2 = std::sqrt(2.0);
+                    if (c >= root2)
+                        phi = mjPI / 2.0;
+                    else
+                    {
+                        double s = c / root2;
+                        s = std::max(0.0, std::min(1.0, s));
+                        phi = std::asin(s) - (mjPI / 4.0);
+                    }
+                    const double th_min = mjPI * 5.0 / 180.0;
+                    const double th_max = mjPI * 80.0 / 180.0;
+                    phi = std::max(th_min, std::min(th_max, phi));
+
+                    j->limited = mjLIMITED_TRUE;
+                    j->range[0] = 0.0;
+                    j->range[1] = phi;
+                    // NOTE: do not modify j->pos here (anchor stays where it was created)
                 }
             }
         }

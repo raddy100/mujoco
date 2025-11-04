@@ -30,7 +30,7 @@ extern double lasty;
 
 // Build / physics toggles
 extern bool g_boxesCollide;
-extern int g_jointMode; //0: hinges,1: ball
+extern int g_jointMode; //1: ball
 extern bool g_physicsEnabled;
 extern mjtNum g_savedGravity[3];
 
@@ -76,7 +76,7 @@ extern bool g_hasSavedPrePhysicsState;
 extern std::vector<SavedBodyPos> g_savedPrePhysicsChain;
 
 // Softer defaults and constants
-extern const double kHingeDamping;
+extern const double kJointDamping;
 extern const double kGeomMargin;
 extern const double kSolref[2];
 extern const double kSolimp[5];

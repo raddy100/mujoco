@@ -41,6 +41,7 @@ endif()
 add_executable(ProGUI
   main_progui.cc
   progui_globals.cpp
+  progui_globals.h
   progui_ui.cpp
   progui_sim.cpp
   progui_chain.cpp
