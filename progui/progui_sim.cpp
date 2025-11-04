@@ -180,44 +180,6 @@ int ProbeGetHitBodyId()
     return -1;
 }
 
-static void RecomputeJointLimitsForChain()
-{
-    if (!spec || !m || !d)
-        return;
-
-    const double boxEdge = 2.0 * kBoxHalf;
-    const double gap = g_gapRatio * boxEdge;
-    const double r_perp = std::sqrt(kBoxHalf * kBoxHalf + kBoxHalf * kBoxHalf);
-
-    // iterate all joints in spec
-    for (mjsElement *jel = mjs_firstElement(spec, mjOBJ_JOINT); jel; jel = mjs_nextElement(spec, jel))
-    {
-        mjsJoint *j = mjs_asJoint(jel);
-        if (!j)
-            continue;
-        if (j->type == mjJNT_BALL)
-        {
-            const double a = kBoxHalf;
-            const double c = 1.0 + (a > 0.0 ? (gap / a) : 0.0);
-            double phi = 0.0;
-            const double root2 = std::sqrt(2.0);
-            if (c >= root2)
-                phi = mjPI / 2.0;
-            else
-            {
-                double s = c / root2;
-                s = std::max(0.0, std::min(1.0, s));
-                phi = std::asin(s) - (mjPI / 4.0);
-            }
-            const double th_min = mjPI * 5.0 / 180.0;
-            const double th_max = mjPI * 80.0 / 180.0;
-            phi = std::max(th_min, std::min(th_max, phi));
-            j->limited = mjLIMITED_TRUE;
-            j->range[0] = 0.0;
-            j->range[1] = phi;
-        }
-    }
-}
 
 static void ApplyGapToChainLayout()
 {
@@ -227,7 +189,7 @@ static void ApplyGapToChainLayout()
     const double gap = g_gapRatio * boxEdge;
 
     const double r_perp = std::sqrt(kBoxHalf * kBoxHalf + kBoxHalf * kBoxHalf);
-
+    double phi = 0.0;
 
     // update positions for all non-root bodies using stored axis/sign and distanceFactor
     if (g_chain.size() <= 1)
@@ -264,7 +226,7 @@ static void ApplyGapToChainLayout()
                     // compute allowable cone angle phi from gap
                     const double a = kBoxHalf;
                     const double c = 1.0 + (a > 0.0 ? (gap / a) : 0.0);
-                    double phi = 0.0;
+                    phi = 0.0;
                     const double root2 = std::sqrt(2.0);
                     if (c >= root2)
                         phi = mjPI / 2.0;
@@ -278,21 +240,26 @@ static void ApplyGapToChainLayout()
                     const double th_max = mjPI * 80.0 / 180.0;
                     phi = std::max(th_min, std::min(th_max, phi));
 
+                    // Use degrees for the joint range upper bound
+                    double phi_deg = phi * 180.0 / mjPI;
+
                     j->limited = mjLIMITED_TRUE;
                     j->range[0] = 0.0;
-                    j->range[1] = phi;
+                    j->range[1] = phi_deg/2;
                     // NOTE: do not modify j->pos here (anchor stays where it was created)
                 }
             }
         }
     }
+
+    std::cout << "new angle value :" << phi << " rad (" << (phi * 180.0 / mjPI) << " deg) for gap ratio " << g_gapRatio
+              << "\n";
 }
 
 void IncreaseGap()
 {
     g_gapRatio = std::min(1.0, g_gapRatio + 0.05);
     ApplyGapToChainLayout();
-    RecomputeJointLimitsForChain();
     if (g_probeRect)
     {
         int axisIdx = 0, sign = +1;
@@ -318,7 +285,6 @@ void DecreaseGap()
 {
     g_gapRatio = std::max(0.0, g_gapRatio - 0.05);
     ApplyGapToChainLayout();
-    RecomputeJointLimitsForChain();
     if (g_probeRect)
     {
         int axisIdx = 0, sign = +1;

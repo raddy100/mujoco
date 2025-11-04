@@ -608,9 +608,12 @@ void spawnCube()
                 const double th_max = mjPI * 80.0 / 180.0;
                 phi = std::max(th_min, std::min(th_max, phi));
 
+                // Use degrees for the joint range upper bound
+                double phi_deg = phi * 180.0 / mjPI;
+
                 bj->limited = mjLIMITED_TRUE;
                 bj->range[0] = 0.0;
-                bj->range[1] = phi;
+                bj->range[1] = phi_deg/2;
             }
             else
             {
