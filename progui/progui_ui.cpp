@@ -198,7 +198,9 @@ void keyboard(GLFWwindow *window, int key, int scancode, int act, int mods)
 
     if (act == GLFW_PRESS && key == GLFW_KEY_C)
     {
-        spawnCube();
+        // spawn using direction token, where token is interpreted relative to current spawn face
+        spawnCubeFromInput("forward");
+        return;
     }
 
     if (act == GLFW_PRESS && key == GLFW_KEY_H)
