@@ -37,7 +37,7 @@ double g_gapRatio =0.05; // default5% of box width
 char g_gapRatioLabel[64] = "gap:0.05";
 
 // IO filename buffer
-char g_ioFilename[256] = "chain_save.xml";
+char g_ioFilename[256] = "chain_save.txt";
 int g_fileIoMode =0;
 
 // pre-physics state
@@ -125,11 +125,22 @@ void RecordTurnInput(int oldFace, int newFace)
  return;
  }
 
- // Leaving Z to XY: ambiguous left/right, ignore
+ // Leaving Z to XY: ambiguous left/right — record as Turnfront / TurnBack
+ if (oldAxis ==2 && (newAxis ==0 || newAxis ==1))
+ {
+ // Use the sign of the new face to disambiguate: positive => front, negative => back
+ g_directionHistory.push_back(newSign >0 ? "Turnfront" : "TurnBack");
+ return;
+ }
+
+ // Leaving XY to Z handled above; other cases ignored
 }
+
+bool g_suppressDirRecord = false;
 
 void RecordForwardInput()
 {
+ if (g_suppressDirRecord) return;
  g_directionHistory.push_back("forward");
 }
 

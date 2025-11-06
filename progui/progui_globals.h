@@ -109,6 +109,7 @@ void DebugPrintProbeContacts();
 
 // Chain ops
 void spawnCube();
+void spawnCubeFromInput(const char* dirToken); // "forward", "left", "right", "up", "down"
 void deleteLastCube();
 void moveLastCubeX(int dir);
 void moveLastCubeY(int dir);
@@ -139,6 +140,7 @@ void ResetChainToSavedState();
 
 // New feature: track direction inputs relative to previous block
 extern std::vector<std::string> g_directionHistory; // sequence of "forward/left/right/up/down"
+extern bool g_suppressDirRecord; // when true, do not append to direction history (used during load replay)
 void RecordTurnInput(int oldFace, int newFace); // append left/right/up/down based on turn
 void RecordForwardInput(); // append forward on successful spawn relative to previous
 void ClearDirectionHistory(); // clear history (e.g., on load)

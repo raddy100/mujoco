@@ -251,5 +251,11 @@ int main(int argc, const char **argv)
     glfwTerminate();
 #endif
 
+    char temp;
+
+    std::cout << "Press any key to exit...\n";
+
+    std::cin.get(temp);
+
     return EXIT_SUCCESS;
 }
