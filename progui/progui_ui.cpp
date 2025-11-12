@@ -120,12 +120,12 @@ void keyboard(GLFWwindow *window, int key, int scancode, int act, int mods)
         return;
     }
 
-    if (act == GLFW_PRESS && key == GLFW_KEY_EQUAL) // '+' usually shares '=' key without shift info here
+    if (act == GLFW_PRESS && (key == GLFW_KEY_EQUAL || key == GLFW_KEY_KP_ADD)) // '+' shares '='; include numpad '+'
     {
         IncreaseGap();
         return;
     }
-    if (act == GLFW_PRESS && key == GLFW_KEY_MINUS)
+    if (act == GLFW_PRESS && (key == GLFW_KEY_MINUS || key == GLFW_KEY_KP_SUBTRACT)) // include numpad '-'
     {
         DecreaseGap();
         return;
