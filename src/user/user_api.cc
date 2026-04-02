@@ -16,6 +16,8 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <iterator>
@@ -31,6 +33,7 @@
 #include "user/user_cache.h"
 #include "user/user_model.h"
 #include "user/user_objects.h"
+#include "user/user_resource.h"
 #include "user/user_util.h"
 
 namespace {
@@ -63,7 +66,128 @@ mjSpec* mj_copySpec(const mjSpec* s) {
   return &modelC->spec;
 }
 
+// parse file into spec
+mjSpec* mj_parse(const char* filename, const char* content_type,
+                 const mjVFS* vfs, char* error, int error_sz) {
+  mjVFS local_vfs;
+  mujoco::user::Cleanup cleanup;
 
+  // early exit for existing XML workflow
+  auto filepath = mujoco::user::FilePath(filename);
+  if (filepath.Ext() == ".xml" ||
+      filepath.Ext() == ".urdf" ||
+      (content_type && std::strcmp(content_type, "text/xml") == 0)) {
+    return mj_parseXML(filename, vfs, error, error_sz);
+  }
+
+  // If no VFS is provided, we'll create our own temporary one for the duration
+  // of this function.
+  if (vfs == nullptr) {
+    mj_defaultVFS(&local_vfs);
+    cleanup += [&local_vfs](){ mj_deleteVFS(&local_vfs); };
+
+    vfs = &local_vfs;
+  }
+
+  mjResource* resource = mju_openResource("", filename, vfs, error, error_sz);
+  // If we are unable to open the resource, we will create our own resource with
+  // just the filename. This allows decoders that rely on other systems to fetch
+  // their content to function without a custom resource provider.
+  // For example, USD may use identifiers to assets that are strictly in memory
+  // or that are fetched on a need-be basis via URI.
+  if (resource) {
+    cleanup += [resource](){ mju_closeResource(resource); };
+  } else {
+    resource = (mjResource*) mju_malloc(sizeof(mjResource));
+    cleanup += [resource](){ if (resource) mju_free(resource); };
+
+    if (resource == nullptr) {
+      if (error) {
+        strncpy(error, "could not allocate memory", error_sz);
+        error[error_sz - 1] = '\0';
+      }
+      return nullptr;
+    }
+
+    // clear out resource
+    memset(resource, 0, sizeof(mjResource));
+
+    // make space for filename
+    std::string fullname = filename;
+    std::size_t n = fullname.size();
+    resource->name = (char*) mju_malloc(sizeof(char) * (n + 1));
+    cleanup += [resource](){ if (resource) mju_free(resource->name); };
+
+    if (resource->name == nullptr) {
+      if (error) {
+        strncpy(error, "could not allocate memory", error_sz);
+        error[error_sz - 1] = '\0';
+      }
+      return nullptr;
+    }
+    memcpy(resource->name, fullname.c_str(), sizeof(char) * (n + 1));
+  }
+
+  mjSpec* spec = mju_decodeResource(resource, content_type, vfs);
+  if (spec == nullptr) {
+    if (error) {
+      strncpy(error, "could not decode content", error_sz);
+      error[error_sz - 1] = '\0';
+    }
+  }
+  return spec;
+}
+
+// encode spec/model to file
+int mj_encode(const mjSpec* s, const mjModel* m, const char* filename,
+              const char* content_type, const mjVFS* vfs, char* error,
+              int error_sz) {
+  const mjpEncoder* encoder = mjp_findEncoder(filename, content_type);
+  if (!encoder) {
+    if (error) {
+      strncpy(error, "no encoder found", error_sz);
+      error[error_sz - 1] = '\0';
+    }
+    return -1;
+  }
+
+  mjResource resource;
+  memset(&resource, 0, sizeof(resource));
+  resource.name = const_cast<char*>(filename);
+
+  const int nbytes = encoder->encode(s, m, vfs, &resource);
+  if (nbytes < 0 || !resource.data) {
+    if (error) {
+      strncpy(error, "encoder failed", error_sz);
+      error[error_sz - 1] = '\0';
+    }
+    return -1;
+  }
+
+  FILE* fp = fopen(filename, "wb");
+  if (!fp) {
+    std::free(resource.data);
+    if (error) {
+      strncpy(error, "could not open file for writing", error_sz);
+      error[error_sz - 1] = '\0';
+    }
+    return -1;
+  }
+
+  const std::size_t written = fwrite(resource.data, 1, nbytes, fp);
+  fclose(fp);
+  encoder->close_resource(&resource);
+
+  if (static_cast<int>(written) != nbytes) {
+    if (error) {
+      strncpy(error, "failed to write all bytes to file", error_sz);
+      error[error_sz - 1] = '\0';
+    }
+    return -1;
+  }
+
+  return nbytes;
+}
 
 // compile model
 mjModel* mj_compile(mjSpec* s, const mjVFS* vfs) {
@@ -1003,6 +1127,12 @@ mjSpec* mjs_getSpec(mjsElement* element) {
 
 
 
+mjsCompiler* mjs_getCompiler(mjsElement* element) {
+  return static_cast<mjCBase*>(element)->compiler;
+}
+
+
+
 // find spec (model asset) by name
 mjSpec* mjs_findSpec(mjSpec* s, const char* name) {
   mjCModel* model = static_cast<mjCModel*>(s->element);
@@ -1205,7 +1335,6 @@ void mjs_deleteUserValue(mjsElement* element, const char* key) {
 int mjs_sensorDim(const mjsSensor* sensor) {
   switch (sensor->type) {
   case mjSENS_TOUCH:
-  case mjSENS_RANGEFINDER:
   case mjSENS_JOINTPOS:
   case mjSENS_JOINTVEL:
   case mjSENS_TENDONPOS:
@@ -1266,6 +1395,18 @@ int mjs_sensorDim(const mjsSensor* sensor) {
     return 3 * static_cast<const mjCMesh*>(
                    static_cast<mjCSensor*>(sensor->element)->get_obj())
                    ->nvert();
+
+  case mjSENS_RANGEFINDER:
+    {
+      int size = mju_raydataSize(sensor->intprm[0]);
+      int num_rays = 1;
+      if (sensor->objtype == mjOBJ_CAMERA) {
+        const mjCCamera* camera = static_cast<const mjCCamera*>(
+            static_cast<mjCSensor*>(sensor->element)->get_obj());
+        num_rays = camera->spec.resolution[0] * camera->spec.resolution[1];
+      }
+      return size * num_rays;
+    }
 
   case mjSENS_USER:
     return sensor->dim;
@@ -1864,12 +2005,15 @@ void mj_clearCache(mjCache* cache) {
 
 // get the internal asset cache used by the compiler
 mjCache* mj_getCache() {
-  static mjCache cache_cwrapper = {0};
-  // mjCCache is not trivially destructible and so the global cache needs to
-  // allocated on the heap
-  if constexpr (kGlobalCacheSize != 0) {
-    static mjCCache* cache = new(std::nothrow) mjCCache(kGlobalCacheSize);
-    cache_cwrapper.impl_ = cache->Capacity() > 0 ? cache : nullptr;
-  }
+  static mjCache cache_cwrapper = []() {
+    mjCache c = {0};
+    // mjCCache is not trivially destructible and so the global cache needs to
+    // allocated on the heap
+    if constexpr (kGlobalCacheSize != 0) {
+      static mjCCache* cache = new (std::nothrow) mjCCache(kGlobalCacheSize);
+      c.impl_ = cache->Capacity() > 0 ? cache : nullptr;
+    }
+    return c;
+  }();
   return &cache_cwrapper;
 }

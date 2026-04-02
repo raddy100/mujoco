@@ -17,13 +17,13 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <numbers>
 
 #include <filament/Box.h>
 #include <filament/Engine.h>
 #include <math/vec2.h>
 #include <math/vec3.h>
 #include <math/vec4.h>
-#include <mujoco/mjmodel.h>
 #include <mujoco/mujoco.h>
 #include "experimental/filament/filament/buffer_util.h"
 #include "experimental/filament/filament/vertex_util.h"
@@ -87,7 +87,7 @@ class LineBuilder {
   }
 
   filament::Box GetBounds() const {
-    return {{-0.001, -0.001, 0}, {0.001, 0.001, 1}};
+    return filament::Box().set({-0.001, -0.001, 0}, {0.001, 0.001, 1});
   }
 };
 
@@ -137,10 +137,50 @@ class PlaneBuilder {
     }
   }
 
-  filament::Box GetBounds() const { return {{-1, -1, -0.001}, {1, 1, 0.001}}; }
+  filament::Box GetBounds() const {
+    return filament::Box().set({-1, -1, -0.001}, {1, 1, 0.001});
+  }
 
  private:
   int num_quads_per_axis_;
+  float4 orientation_;
+};
+
+class TriangleBuilder {
+ public:
+  using VertexType = VertexNoUv;
+  using IndexType = uint16_t;
+  static constexpr filament::RenderableManager::PrimitiveType kPrimitiveType =
+      filament::RenderableManager::PrimitiveType::TRIANGLES;
+
+  TriangleBuilder()
+      : orientation_(CalculateOrientation({0, 0, 1})) {}
+
+  std::size_t NumVertices() const {
+    return 3;
+  }
+
+  std::size_t NumIndices() const {
+    return 3;
+  }
+
+  void GenerateVertices(VertexType* ptr, size_t num) const {
+    ptr[0] = VertexType({0, 0, 0}, orientation_);
+    ptr[1] = VertexType({1, 0, 0}, orientation_);
+    ptr[2] = VertexType({0, 1, 0}, orientation_);
+  }
+
+  void GenerateIndices(IndexType* ptr, size_t num) const {
+    ptr[0] = 0;
+    ptr[1] = 1;
+    ptr[2] = 2;
+  }
+
+  filament::Box GetBounds() const {
+    return filament::Box().set({-1, -1, -0.001}, {1, 1, 0.001});
+  }
+
+ private:
   float4 orientation_;
 };
 
@@ -203,7 +243,9 @@ class LineBoxBuilder {
     ptr[23] = 5;
   }
 
-  filament::Box GetBounds() const { return {{-1, -1, -1}, {1, 1, 1}}; }
+  filament::Box GetBounds() const {
+    return filament::Box().set({-1, -1, -1}, {1, 1, 1});
+  }
 };
 
 class BoxBuilder {
@@ -269,7 +311,9 @@ class BoxBuilder {
     }
   }
 
-  filament::Box GetBounds() const { return {{-1, -1, -1}, {1, 1, 1}}; }
+  filament::Box GetBounds() const {
+    return filament::Box().set({-1, -1, -1}, {1, 1, 1});
+  }
 
  private:
   template <typename F>
@@ -310,7 +354,7 @@ class TubeBuilder {
   }
 
   void GenerateVertices(VertexType* ptr, size_t num) const {
-    const float delta_angle = 2.f * M_PI / (float)num_slices_;
+    const float delta_angle = 2.f * std::numbers::pi / (float)num_slices_;
     const float delta_stack = 2.f / static_cast<float>(num_stacks_);
 
     int idx = 0;
@@ -342,7 +386,9 @@ class TubeBuilder {
     }
   }
 
-  filament::Box GetBounds() const { return {{-1, -1, -1}, {1, 1, 1}}; }
+  filament::Box GetBounds() const {
+    return filament::Box().set({-1, -1, -1}, {1, 1, 1});
+  }
 
  private:
   int num_stacks_;
@@ -370,7 +416,8 @@ class ConeBuilder {
   }
   void GenerateVertices(VertexType* ptr, std::size_t num) const {
     // pole: use triangles
-    const float delta_angle = 2.0 * M_PI / static_cast<float>(num_slices_);
+    const float delta_angle =
+        2.0 * std::numbers::pi / static_cast<float>(num_slices_);
     const float delta_radius = 1.0f / static_cast<float>(num_stacks_);
 
     int idx = 0;
@@ -424,7 +471,9 @@ class ConeBuilder {
     }
   }
 
-  filament::Box GetBounds() const { return {{-1, -1, 0}, {1, 1, 1}}; }
+  filament::Box GetBounds() const {
+    return filament::Box().set({-1, -1, 0}, {1, 1, 1});
+  }
 
  private:
   static VertexType MakeVert(float theta, float radius) {
@@ -460,7 +509,8 @@ class DiskBuilder {
   }
 
   void GenerateVertices(VertexType* ptr, std::size_t num) const {
-    const float delta_angle = 2.0 * M_PI / static_cast<float>(num_slices_);
+    const float delta_angle =
+        2.0 * std::numbers::pi / static_cast<float>(num_slices_);
 
     int idx = 0;
     ptr[idx++] = VertexType(float3{0, 0, 0}, orientation_);
@@ -482,7 +532,9 @@ class DiskBuilder {
     }
   }
 
-  filament::Box GetBounds() const { return {{-1, -1, -0.001}, {1, 1, 0.001}}; }
+  filament::Box GetBounds() const {
+    return filament::Box().set({-1, -1, -0.001}, {1, 1, 0.001});
+  }
 
  private:
   int num_slices_;
@@ -514,8 +566,10 @@ class SphereBuilder {
   }
 
   void GenerateVertices(VertexType* ptr, size_t num) const {
-    const float lat_angle_delta = M_PI / static_cast<float>(num_stacks_ + 1);
-    const float lon_angle_delta = 2.0 * M_PI / static_cast<float>(num_slices_);
+    const float lat_angle_delta =
+        std::numbers::pi / static_cast<float>(num_stacks_ + 1);
+    const float lon_angle_delta =
+        2.0 * std::numbers::pi / static_cast<float>(num_slices_);
 
     // Add the north and south poles.
     int idx = 0;
@@ -585,7 +639,9 @@ class SphereBuilder {
     }
   }
 
-  filament::Box GetBounds() const { return {{-1, -1, -1}, {1, 1, 1}}; }
+  filament::Box GetBounds() const {
+    return filament::Box().set({-1, -1, -1}, {1, 1, 1});
+  }
 
  private:
   static VertexType MakeVert(float x, float y, float z) {
@@ -621,31 +677,33 @@ class DomeBuilder {
   }
 
     void GenerateVertices(VertexType* ptr, size_t num) const {
-    const float lat_angle_delta = 0.5 * M_PI / static_cast<float>(num_stacks_);
-    const float lon_angle_delta = 2.0 * M_PI / static_cast<float>(num_slices_);
+      const float lat_angle_delta =
+          0.5 * std::numbers::pi / static_cast<float>(num_stacks_);
+      const float lon_angle_delta =
+          2.0 * std::numbers::pi / static_cast<float>(num_slices_);
 
-    // Add the pole.
-    int idx = 0;
-    ptr[idx++] = MakeVert(0, 0, 1);
+      // Add the pole.
+      int idx = 0;
+      ptr[idx++] = MakeVert(0, 0, 1);
 
-    // Vertices by latitude.
-    for (int lat = 0; lat < num_stacks_; ++lat) {
-      // +1 because we handle the north pole (which would be at a lat angle of
-      // 0-degrees) explicitly.
-      const float lat_angle = static_cast<float>(lat + 1) * lat_angle_delta;
-      const float cos_lat_angle = std::cos(lat_angle);
-      const float sin_lat_angle = std::sin(lat_angle);
-      const float z = cos_lat_angle;
+      // Vertices by latitude.
+      for (int lat = 0; lat < num_stacks_; ++lat) {
+        // +1 because we handle the north pole (which would be at a lat angle of
+        // 0-degrees) explicitly.
+        const float lat_angle = static_cast<float>(lat + 1) * lat_angle_delta;
+        const float cos_lat_angle = std::cos(lat_angle);
+        const float sin_lat_angle = std::sin(lat_angle);
+        const float z = cos_lat_angle;
 
-      for (int lon = 0; lon < num_slices_; ++lon) {
-        const float lon_angle = static_cast<float>(lon) * lon_angle_delta;
-        const float cos_lon_angle = std::cos(lon_angle);
-        const float sin_lon_angle = std::sin(lon_angle);
+        for (int lon = 0; lon < num_slices_; ++lon) {
+          const float lon_angle = static_cast<float>(lon) * lon_angle_delta;
+          const float cos_lon_angle = std::cos(lon_angle);
+          const float sin_lon_angle = std::sin(lon_angle);
 
-        const float x = sin_lat_angle * cos_lon_angle;
-        const float y = sin_lat_angle * sin_lon_angle;
-        ptr[idx++] = MakeVert(x, y, z);
-      }
+          const float x = sin_lat_angle * cos_lon_angle;
+          const float y = sin_lat_angle * sin_lon_angle;
+          ptr[idx++] = MakeVert(x, y, z);
+        }
     }
   }
 
@@ -684,7 +742,9 @@ class DomeBuilder {
     }
   }
 
-  filament::Box GetBounds() const { return {{-1, -1, 0}, {1, 1, 1}}; }
+  filament::Box GetBounds() const {
+    return filament::Box().set({-1, -1, 0}, {1, 1, 1});
+  }
 
  private:
   static VertexType MakeVert(float x, float y, float z) {
@@ -729,51 +789,44 @@ FilamentBuffers CreateFromBuilder(filament::Engine* engine, const T& builder) {
   return {ib, vb, builder.GetBounds(), T::kPrimitiveType};
 }
 
-FilamentBuffers CreateLine(filament::Engine* engine, const mjModel* model) {
+FilamentBuffers CreateLine(filament::Engine* engine) {
   return CreateFromBuilder(engine, LineBuilder());
 }
 
-FilamentBuffers CreatePlane(filament::Engine* engine, const mjModel* model) {
-  const int num_quads = model->vis.quality.numquads;
-  return CreateFromBuilder(engine, PlaneBuilder(num_quads));
+FilamentBuffers CreatePlane(filament::Engine* engine, int nquad) {
+  return CreateFromBuilder(engine, PlaneBuilder(nquad));
 }
 
-FilamentBuffers CreateBox(filament::Engine* engine, const mjModel* model) {
-  const int num_quads = model->vis.quality.numquads;
-  return CreateFromBuilder(engine, BoxBuilder(num_quads));
+FilamentBuffers CreateTriangle(filament::Engine* engine) {
+  return CreateFromBuilder(engine, TriangleBuilder());
 }
 
-FilamentBuffers CreateLineBox(filament::Engine* engine, const mjModel* model) {
+FilamentBuffers CreateBox(filament::Engine* engine, int nquad) {
+  return CreateFromBuilder(engine, BoxBuilder(nquad));
+}
+
+FilamentBuffers CreateLineBox(filament::Engine* engine) {
   return CreateFromBuilder(engine, LineBoxBuilder());
 }
 
-FilamentBuffers CreateSphere(filament::Engine* engine, const mjModel* model) {
-  const int num_stacks = model->vis.quality.numstacks;
-  const int num_slices = model->vis.quality.numslices;
-  return CreateFromBuilder(engine, SphereBuilder(num_stacks, num_slices));
+FilamentBuffers CreateSphere(filament::Engine* engine, int nstack, int nslice) {
+  return CreateFromBuilder(engine, SphereBuilder(nstack, nslice));
 }
 
-FilamentBuffers CreateTube(filament::Engine* engine, const mjModel* model) {
-  const int num_stacks = model->vis.quality.numstacks;
-  const int num_slices = model->vis.quality.numslices;
-  return CreateFromBuilder(engine, TubeBuilder(num_stacks, num_slices));
+FilamentBuffers CreateTube(filament::Engine* engine, int nstack, int nslice) {
+  return CreateFromBuilder(engine, TubeBuilder(nstack, nslice));
 }
 
-FilamentBuffers CreateDisk(filament::Engine* engine, const mjModel* model) {
-  const int num_slices = model->vis.quality.numslices;
-  return CreateFromBuilder(engine, DiskBuilder(num_slices));
+FilamentBuffers CreateDisk(filament::Engine* engine, int nslice) {
+  return CreateFromBuilder(engine, DiskBuilder(nslice));
 }
 
-FilamentBuffers CreateDome(filament::Engine* engine, const mjModel* model) {
-  const int num_stacks = model->vis.quality.numstacks / 2;
-  const int num_slices = model->vis.quality.numslices;
-  return CreateFromBuilder(engine, DomeBuilder(num_stacks, num_slices));
+FilamentBuffers CreateDome(filament::Engine* engine, int nstack, int nslice) {
+  return CreateFromBuilder(engine, DomeBuilder(nstack, nslice));
 }
 
-FilamentBuffers CreateCone(filament::Engine* engine, const mjModel* model) {
-  const int num_stacks = model->vis.quality.numstacks;
-  const int num_slices = model->vis.quality.numslices;
-  return CreateFromBuilder(engine, ConeBuilder(num_stacks, num_slices));
+FilamentBuffers CreateCone(filament::Engine* engine, int nstack, int nslice) {
+  return CreateFromBuilder(engine, ConeBuilder(nstack, nslice));
 }
 
 }  // namespace mujoco

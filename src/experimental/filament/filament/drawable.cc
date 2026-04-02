@@ -16,6 +16,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <numbers>
 #include <utility>
 
 #include <filament/Material.h>
@@ -28,12 +29,15 @@
 #include <math/vec3.h>
 #include <math/vec4.h>
 #include <utils/Entity.h>
+#include <mujoco/mjvisualize.h>
 #include <mujoco/mujoco.h>
 #include "experimental/filament/filament/buffer_util.h"
 #include "experimental/filament/filament/geom_util.h"
 #include "experimental/filament/filament/material.h"
 #include "experimental/filament/filament/math_util.h"
+#include "experimental/filament/filament/model_objects.h"
 #include "experimental/filament/filament/object_manager.h"
+#include "experimental/filament/filament/texture.h"
 
 namespace mujoco {
 
@@ -41,10 +45,6 @@ using filament::math::float2;
 using filament::math::float3;
 using filament::math::float4;
 using filament::math::mat4;
-
-// Planes with a 0-size dimension should be infinitely large. However, we
-// don't support that directly so we use a large but finite size instead.
-static constexpr float kInfinitePlaneFakeSize = 1000.0f;
 
 // An arbitrary scale factor for arrows.
 static constexpr float kArrowScale = 1.f / 6.f;
@@ -68,52 +68,103 @@ static constexpr int kArrow2BottomCone = 2;
 static constexpr int kArrow2TopConeDisk = 3;
 static constexpr int kArrow2BottomConeDisk = 4;
 
-Drawable::Drawable(ObjectManager* object_mgr, const mjvGeom& geom)
-    : material_(object_mgr),
-      renderables_(object_mgr->GetEngine()) {
-  if (geom.type == mjGEOM_MESH) {
-    AddMesh(geom.dataid);
-  } else if (geom.type == mjGEOM_HFIELD) {
-    AddHeightField(geom.dataid);
-  } else if (geom.type == mjGEOM_PLANE) {
-    AddShape(ObjectManager::kPlane);
-  } else if (geom.type == mjGEOM_SPHERE) {
-    AddShape(ObjectManager::kSphere);
-  } else if (geom.type == mjGEOM_ELLIPSOID) {
-    AddShape(ObjectManager::kSphere);
-  } else if (geom.type == mjGEOM_BOX) {
-    AddShape(ObjectManager::kBox);
-  } else if (geom.type == mjGEOM_CAPSULE) {
-    AddShape(ObjectManager::kTube);
-    AddShape(ObjectManager::kDome);
-    AddShape(ObjectManager::kDome);
-  } else if (geom.type == mjGEOM_CYLINDER) {
-    AddShape(ObjectManager::kTube);
-    AddShape(ObjectManager::kDisk);
-    AddShape(ObjectManager::kDisk);
-  } else if (geom.type == mjGEOM_ARROW) {
-    AddShape(ObjectManager::kTube);
-    AddShape(ObjectManager::kCone);
-    AddShape(ObjectManager::kDisk);
-  } else if (geom.type == mjGEOM_ARROW1) {
-    AddShape(ObjectManager::kTube);
-    AddShape(ObjectManager::kCone);
-    AddShape(ObjectManager::kDisk);
-    AddShape(ObjectManager::kDisk);
-  } else if (geom.type == mjGEOM_ARROW2) {
-    AddShape(ObjectManager::kTube);
-    AddShape(ObjectManager::kCone);
-    AddShape(ObjectManager::kCone);
-    AddShape(ObjectManager::kDisk);
-    AddShape(ObjectManager::kDisk);
-  } else if (geom.type == mjGEOM_LINE) {
-    AddShape(ObjectManager::kLine);
-  } else if (geom.type == mjGEOM_LINEBOX) {
-    AddShape(ObjectManager::kLineBox);
-  } else if (geom.type == mjGEOM_FLEX || geom.type == mjGEOM_SKIN) {
-    // Flex and skin geometries are dynamically updated every frame.
+// Returns the tile size for infinite plane texture alignment.
+// This is duplicated from engine_vis_visualize.c (re-center infinite plane)
+// to ensure UV scaling matches the re-centering increments.
+static float GetPlaneTileSize(const mjModel* model, int matid,
+                              float texrepeat) {
+  if (matid >= 0 && texrepeat > 0) {
+    return 2.0f / texrepeat;
   } else {
-    mju_warning("Unsupported geom type: %d", geom.type);
+    const float zfar = model->vis.map.zfar * model->stat.extent;
+    return 2.1f * zfar / (mjMAXPLANEGRID - 2);
+  }
+}
+
+static bool IsBehind(const mjtNum* headpos, const float* pos, const float* mat) {
+  return ((headpos[0] - pos[0]) * mat[2] +
+          (headpos[1] - pos[1]) * mat[5] +
+          (headpos[2] - pos[2]) * mat[8] < 0.0f);
+}
+
+Drawable::Drawable(ObjectManager* object_mgr, ModelObjects* model_objects,
+                   const mjvGeom& geom)
+    : material_(object_mgr),
+      model_objs_(model_objects),
+      renderables_(object_mgr->GetEngine()) {
+  if (geom.category == mjCAT_DECOR) {
+    renderables_.SetCastShadows(false);
+    renderables_.SetReceiveShadows(false);
+  }
+
+  switch ((mjtGeom)geom.type) {
+    case mjGEOM_MESH:
+      AddMesh(geom.dataid);
+      break;
+    case mjGEOM_HFIELD:
+      AddHeightField(geom.dataid);
+      break;
+    case mjGEOM_PLANE:
+      AddShape(ModelObjects::kPlane);
+      break;
+    case mjGEOM_SPHERE:
+      AddShape(ModelObjects::kSphere);
+      break;
+    case mjGEOM_ELLIPSOID:
+      AddShape(ModelObjects::kSphere);
+      break;
+    case mjGEOM_BOX:
+      AddShape(ModelObjects::kBox);
+      break;
+    case mjGEOM_CAPSULE:
+      AddShape(ModelObjects::kTube);
+      AddShape(ModelObjects::kDome);
+      AddShape(ModelObjects::kDome);
+      break;
+    case mjGEOM_CYLINDER:
+      AddShape(ModelObjects::kTube);
+      AddShape(ModelObjects::kDisk);
+      AddShape(ModelObjects::kDisk);
+      break;
+    case mjGEOM_ARROW:
+      AddShape(ModelObjects::kTube);
+      AddShape(ModelObjects::kCone);
+      AddShape(ModelObjects::kDisk);
+      break;
+    case mjGEOM_ARROW1:
+      AddShape(ModelObjects::kTube);
+      AddShape(ModelObjects::kCone);
+      AddShape(ModelObjects::kDisk);
+      AddShape(ModelObjects::kDisk);
+      break;
+    case mjGEOM_ARROW2:
+      AddShape(ModelObjects::kTube);
+      AddShape(ModelObjects::kCone);
+      AddShape(ModelObjects::kCone);
+      AddShape(ModelObjects::kDisk);
+      AddShape(ModelObjects::kDisk);
+      break;
+    case mjGEOM_LINE:
+      AddShape(ModelObjects::kLine);
+      break;
+    case mjGEOM_LINEBOX:
+      AddShape(ModelObjects::kLineBox);
+      break;
+    case mjGEOM_TRIANGLE:
+      AddShape(ModelObjects::kTriangle);
+      break;
+    case mjGEOM_FLEX:
+    case mjGEOM_SKIN:
+      // Flex and skin geometries are dynamically updated every frame.
+      break;
+    case mjGEOM_NONE:
+    case mjGEOM_LABEL:
+      // Do nothing .
+      break;
+    case mjGEOM_SDF:
+    case mjNGEOMTYPES:
+      mju_warning("Unsupported geom type: %d", geom.type);
+      break;
   }
 }
 
@@ -131,13 +182,17 @@ void Drawable::Update(const mjModel* model, const mjvScene* scene,
     }
   }
 
+  mjtNum head_pos[3];
+  mjv_cameraInModel(head_pos, nullptr, nullptr, scene);
+
   SetTransform(geom);
-  UpdateMaterial(geom);
+  UpdateMaterial(geom, scene->flags[mjRND_IDCOLOR],
+                 scene->flags[mjRND_REFLECTION], head_pos);
+  renderables_.SetWireframe(scene->flags[mjRND_WIREFRAME]);
 }
 
 void Drawable::AddMesh(int data_id) {
-  ObjectManager* object_mgr = material_.GetObjectManager();
-  const FilamentBuffers* buffers = object_mgr->GetMeshBuffer(data_id);
+  const FilamentBuffers* buffers = model_objs_->GetMeshBuffer(data_id);
   if (buffers == nullptr) {
     mju_error("Unknown mesh %d", data_id);
   }
@@ -145,17 +200,15 @@ void Drawable::AddMesh(int data_id) {
 }
 
 void Drawable::AddHeightField(int hfield_id) {
-  ObjectManager* object_mgr = material_.GetObjectManager();
-  const FilamentBuffers* buffers = object_mgr->GetHeightFieldBuffer(hfield_id);
+  const FilamentBuffers* buffers = model_objs_->GetHeightFieldBuffer(hfield_id);
   if (buffers == nullptr) {
     mju_error("Unknown height field %d", hfield_id);
   }
   renderables_.Append(*buffers);
 }
 
-void Drawable::AddShape(ObjectManager::ShapeType shape_type) {
-  ObjectManager* object_mgr = material_.GetObjectManager();
-  const FilamentBuffers* buffers = object_mgr->GetShapeBuffer(shape_type);
+void Drawable::AddShape(ModelObjects::ShapeType shape_type) {
+  const FilamentBuffers* buffers = model_objs_->GetShapeBuffer(shape_type);
   if (buffers == nullptr) {
     mju_error("Unknown shape %d", shape_type);
   }
@@ -174,13 +227,21 @@ void Drawable::SetDrawMode(Material::DrawMode mode) {
   renderables_.SetMaterialInstance(material_.GetMaterialInstance(mode));
 }
 
+void Drawable::UpdateReflectionTexture(const Texture* tex) {
+  material_.UpdateReflectionTexture(tex);
+}
+
+void Drawable::SetLayerMask(std::uint8_t mask) {
+  renderables_.SetLayerMask(mask);
+}
+
 void Drawable::SetTransform(const mjvGeom& geom) {
   // Flex and skin geometries are in global space.
   if (geom.type == mjGEOM_FLEX || geom.type == mjGEOM_SKIN) {
     return;
   }
 
-  const mat4 transform(ReadMat3(geom.mat), ReadFloat3(geom.pos));
+  transform_ = mat4(ReadMat3(geom.mat), ReadFloat3(geom.pos));
 
   float3 size = ReadFloat3(geom.size);
   filament::TransformManager& tm =
@@ -189,7 +250,7 @@ void Drawable::SetTransform(const mjvGeom& geom) {
     const utils::Entity& entity = renderables_[j];
 
     // Update object transform.
-    mat4 entity_transform = transform;
+    mat4 entity_transform = transform_;
 
     // Some built-in drawables are composed of multiple entities. For example,
     // capsules are a combination of a open tube and two dome end caps.
@@ -201,7 +262,7 @@ void Drawable::SetTransform(const mjvGeom& geom) {
         entity_transform *= mat4::translation(float3{0, 0, size.z});
       } else if (j == kCylinderBottomDisk) {
         entity_transform *= mat4::translation(float3{0, 0, -size.z});
-        entity_transform *= mat4::rotation(M_PI, float3{1, 0, 0});
+        entity_transform *= mat4::rotation(std::numbers::pi, float3{1, 0, 0});
       }
     } else if (geom.type == mjGEOM_CAPSULE) {
       // Capsules are a tube with two domes at the ends. We apply an inverse
@@ -213,7 +274,7 @@ void Drawable::SetTransform(const mjvGeom& geom) {
         entity_transform *= mat4::scaling(float3{1, 1, xz_size / size.z});
       } else if (j == kCapsuleBottomDome) {
         entity_transform *= mat4::translation(float3{0, 0, -size.z});
-        entity_transform *= mat4::rotation(M_PI, float3{1, 0, 0});
+        entity_transform *= mat4::rotation(std::numbers::pi, float3{1, 0, 0});
         entity_transform *= mat4::scaling(float3{1, 1, xz_size / size.z});
       }
     } else if (geom.type == mjGEOM_ARROW) {
@@ -222,48 +283,48 @@ void Drawable::SetTransform(const mjvGeom& geom) {
       // disk is added to the base of the cone. This disk is rotated such that
       // its normal points outwards.
       entity_transform *= mat4::scaling(float3{1, 1, kArrowScale});
-      entity_transform *= mat4::translation(float3{0, 0, kArrowScale});
+      entity_transform *= mat4::translation(float3{0, 0, size.z});
       if (j == kArrow0Cone) {
         entity_transform *= mat4::translation(float3{0, 0, size.z});
         entity_transform *=
             mat4::scaling(float3{kArrowHeadSize, kArrowHeadSize, 1.0f});
       } else if (j == kArrow0ConeDisk) {
         entity_transform *= mat4::translation(float3{0, 0, size.z});
-        entity_transform *= mat4::rotation(M_PI, float3{1, 0, 0});
+        entity_transform *= mat4::rotation(std::numbers::pi, float3{1, 0, 0});
         entity_transform *=
             mat4::scaling(float3{kArrowHeadSize, kArrowHeadSize, 1.0f});
       } else if (j == kArrow0BottomDisk) {
         entity_transform *= mat4::translation(float3{0, 0, -size.z});
-        entity_transform *= mat4::rotation(M_PI, float3{1, 0, 0});
+        entity_transform *= mat4::rotation(std::numbers::pi, float3{1, 0, 0});
       }
     } else if (geom.type == mjGEOM_ARROW1) {
       // An arrow1 is a tube with a cone at the end and a disk cap at the other
       // end.
       entity_transform *= mat4::scaling(float3{1, 1, kArrowScale});
-      entity_transform *= mat4::translation(float3{0, 0, kArrowScale});
+      entity_transform *= mat4::translation(float3{0, 0, size.z});
       if (j == kArrow1Cone) {
         entity_transform *= mat4::translation(float3{0, 0, size.z});
       } else if (j == kArrow1BottomDisk) {
         entity_transform *= mat4::translation(float3{0, 0, -size.z});
-        entity_transform *= mat4::rotation(M_PI, float3{1, 0, 0});
+        entity_transform *= mat4::rotation(std::numbers::pi, float3{1, 0, 0});
       }
     } else if (geom.type == mjGEOM_ARROW2) {
       // An arrow2 is a tube with a cone at both ends.  Like the standard arrow,
       // an extra disk is added to the base of each cone.
       entity_transform *= mat4::scaling(float3{1, 1, kArrowScale});
-      entity_transform *= mat4::translation(float3{0, 0, kArrowScale});
+      entity_transform *= mat4::translation(float3{0, 0, size.z});
       if (j == kArrow2TopCone) {
         entity_transform *= mat4::translation(float3{0, 0, size.z});
         entity_transform *=
             mat4::scaling(float3{kArrowHeadSize, kArrowHeadSize, 1.0f});
       } else if (j == kArrow2BottomCone) {
         entity_transform *= mat4::translation(float3{0, 0, -size.z});
-        entity_transform *= mat4::rotation(M_PI, float3{1, 0, 0});
+        entity_transform *= mat4::rotation(std::numbers::pi, float3{1, 0, 0});
         entity_transform *=
             mat4::scaling(float3{kArrowHeadSize, kArrowHeadSize, 1.0f});
       } else if (j == kArrow2TopConeDisk) {
         entity_transform *= mat4::translation(float3{0, 0, size.z});
-        entity_transform *= mat4::rotation(M_PI, float3{1, 0, 0});
+        entity_transform *= mat4::rotation(std::numbers::pi, float3{1, 0, 0});
         entity_transform *=
             mat4::scaling(float3{kArrowHeadSize, kArrowHeadSize, 1.0f});
       } else if (j == kArrow2BottomConeDisk) {
@@ -271,41 +332,63 @@ void Drawable::SetTransform(const mjvGeom& geom) {
         entity_transform *=
             mat4::scaling(float3{kArrowHeadSize, kArrowHeadSize, 1.0f});
       }
-    } else if (geom.type == mjGEOM_PLANE) {
-      // A plane with 0-size in any dimension is considered to be an infinite
-      // plane, but we don't really support that so just scale it so that its
-      // very large.
-      if (size.x == 0 && size.y == 0) {
-        size = float3(kInfinitePlaneFakeSize, kInfinitePlaneFakeSize, size.z);
-      }
     }
-
-    if (geom.type != mjGEOM_MESH && geom.type != mjGEOM_HFIELD) {
+    if (geom.type == mjGEOM_PLANE) {
+      const bool is_infinite = !(size.x > 0 && size.y > 0);
+      if (is_infinite) {
+        // Infinite planes are scaled to match the tile size used by
+        // re-centering in engine_vis_visualize.c.
+        const float plane_scale = static_cast<float>(mjMAXPLANEGRID) / 2.0f;
+        entity_transform *=
+            mat4::scaling(float3{plane_scale, plane_scale, 1.0f});
+      } else {
+        // Regular planes are scaled by geom.size.
+        entity_transform *= mat4::scaling(float3{size.x, size.y, 1.0f});
+      }
+    } else if (geom.type != mjGEOM_MESH && geom.type != mjGEOM_HFIELD) {
       entity_transform *= mat4::scaling(size);
     }
     tm.setTransform(tm.getInstance(entity), entity_transform);
   }
 }
 
-void Drawable::UpdateMaterial(const mjvGeom& geom) {
-  ObjectManager* object_mgr = material_.GetObjectManager();
-  const mjModel* model = object_mgr->GetModel();
+void Drawable::UpdateMaterial(const mjvGeom& geom, bool use_segid_color,
+                              bool enable_reflection, const mjtNum* headpos) {
+  const mjModel* model = model_objs_->GetModel();
+
+  float4 color = ReadFloat4(geom.rgba);
+  if (geom.type == mjGEOM_PLANE) {
+    if (IsBehind(headpos, geom.pos, geom.mat)) {
+      color[3] *= 0.3;
+      renderables_.SetReceiveShadows(false);
+      reflective_ = false;
+    } else {
+      renderables_.SetReceiveShadows(true);
+      reflective_ =
+          enable_reflection && geom.reflectance > 0 && color.a == 1.0f;
+    }
+  }
 
   Material::Textures textures;
   if (geom.matid >= 0) {
-    textures.color = object_mgr->GetTexture(geom.matid, mjTEXROLE_RGB);
-    textures.normal = object_mgr->GetTexture(geom.matid, mjTEXROLE_NORMAL);
-    textures.emissive = object_mgr->GetTexture(geom.matid, mjTEXROLE_EMISSIVE);
-    textures.orm = object_mgr->GetTexture(geom.matid, mjTEXROLE_ORM);
-    textures.metallic = object_mgr->GetTexture(geom.matid, mjTEXROLE_METALLIC);
-    textures.roughness = object_mgr->GetTexture(geom.matid, mjTEXROLE_ROUGHNESS);
-    textures.occlusion = object_mgr->GetTexture(geom.matid, mjTEXROLE_OCCLUSION);
+    textures.color = model_objs_->GetTexture(geom.matid, mjTEXROLE_RGB);
+    textures.normal = model_objs_->GetTexture(geom.matid, mjTEXROLE_NORMAL);
+    textures.emissive = model_objs_->GetTexture(geom.matid, mjTEXROLE_EMISSIVE);
+    textures.orm = model_objs_->GetTexture(geom.matid, mjTEXROLE_ORM);
+    textures.metallic = model_objs_->GetTexture(geom.matid, mjTEXROLE_METALLIC);
+    textures.roughness =
+        model_objs_->GetTexture(geom.matid, mjTEXROLE_ROUGHNESS);
+    textures.occlusion =
+        model_objs_->GetTexture(geom.matid, mjTEXROLE_OCCLUSION);
+    material_.UpdateTextures(textures);
   }
 
   if (geom.type == mjGEOM_LINE || geom.type == mjGEOM_LINEBOX) {
     material_.SetNormalMaterialType(ObjectManager::kUnlitLine);
   } else {
+    bool material_assigned = false;
     if (geom.matid >= 0) {
+      material_assigned = true;
       if (textures.orm) {
         material_.SetNormalMaterialType(ObjectManager::kPbrPacked);
       } else if (textures.metallic) {
@@ -316,52 +399,62 @@ void Drawable::UpdateMaterial(const mjvGeom& geom) {
         material_.SetNormalMaterialType(ObjectManager::kPbr);
       } else if (model->mat_roughness[geom.matid] >= 0) {
         material_.SetNormalMaterialType(ObjectManager::kPbr);
+      } else {
+        material_assigned = false;
       }
     }
 
-    // Check to see if we're dealing with a mesh with texture coordinates.
-    // `data_id` is the id of the mesh in model (i.e. the geom has mesh geometry)
-    // and `mesh_texcoordadr` stores the address of the mesh uvs if it has them.
-    bool has_texcoords = false;
-    if ((geom.type == mjGEOM_MESH || geom.type == mjGEOM_SDF) &&
-        geom.dataid >= 0 && model->mesh_texcoordadr[geom.dataid / 2] >= 0) {
-      has_texcoords = true;
-    }
+    if (!material_assigned) {
+      // Check to see if we're dealing with a mesh with texture coordinates.
+      // `data_id` is the id of the mesh in model (i.e. the geom has mesh
+      // geometry) and `mesh_texcoordadr` stores the address of the mesh uvs if
+      // it has them.
+      bool has_texcoords = false;
+      if ((geom.type == mjGEOM_MESH || geom.type == mjGEOM_SDF) &&
+          geom.dataid >= 0 && model->mesh_texcoordadr[geom.dataid / 2] >= 0) {
+        has_texcoords = true;
+      }
 
-    if (textures.color == nullptr) {
-      if (geom.rgba[3] < 1.0f) {
-        material_.SetNormalMaterialType(ObjectManager::kPhongColorFade);
+      if (textures.color == nullptr) {
+        if (color.a < 1.0f) {
+          material_.SetNormalMaterialType(ObjectManager::kPhongColorFade);
+        } else if (reflective_) {
+          material_.SetNormalMaterialType(ObjectManager::kPhongColorReflect);
+        } else {
+          material_.SetNormalMaterialType(ObjectManager::kPhongColor);
+        }
+      } else if (textures.color->GetFilamentTexture()->getTarget() ==
+                filament::Texture::Sampler::SAMPLER_CUBEMAP) {
+        if (color.a < 1.0f) {
+          material_.SetNormalMaterialType(ObjectManager::kPhongCubeFade);
+        } else if (reflective_) {
+          material_.SetNormalMaterialType(ObjectManager::kPhongCubeReflect);
+        } else {
+          material_.SetNormalMaterialType(ObjectManager::kPhongCube);
+        }
+      } else if (has_texcoords) {
+        if (color.a < 1.0f) {
+          material_.SetNormalMaterialType(ObjectManager::kPhong2dUvFade);
+        } else if (reflective_) {
+          material_.SetNormalMaterialType(ObjectManager::kPhong2dUvReflect);
+        } else {
+          material_.SetNormalMaterialType(ObjectManager::kPhong2dUv);
+        }
       } else {
-        material_.SetNormalMaterialType(ObjectManager::kPhongColor);
-      }
-    } else if (textures.color->getTarget() ==
-              filament::Texture::Sampler::SAMPLER_CUBEMAP) {
-      if (geom.rgba[3] < 1.0f) {
-        material_.SetNormalMaterialType(ObjectManager::kPhongCubeFade);
-      } else {
-        material_.SetNormalMaterialType(ObjectManager::kPhongCube);
-      }
-    } else if (has_texcoords) {
-      if (geom.rgba[3] < 1.0f) {
-        material_.SetNormalMaterialType(ObjectManager::kPhong2dUvFade);
-      } else {
-        material_.SetNormalMaterialType(ObjectManager::kPhong2dUv);
-      }
-    } else {
-      if (geom.rgba[3] < 1.0f) {
-        material_.SetNormalMaterialType(ObjectManager::kPhong2dFade);
-      } else {
-        material_.SetNormalMaterialType(ObjectManager::kPhong2d);
+        if (color.a < 1.0f) {
+          material_.SetNormalMaterialType(ObjectManager::kPhong2dFade);
+        } else if (reflective_) {
+          material_.SetNormalMaterialType(ObjectManager::kPhong2dReflect);
+        } else {
+          material_.SetNormalMaterialType(ObjectManager::kPhong2d);
+        }
       }
     }
-  }
-
-  if (geom.matid >= 0) {
-    material_.UpdateTextures(textures);
   }
 
   Material::Params params;
-  params.color = ReadFloat4(geom.rgba);
+  params.color = color;
+  params.reflectance = geom.reflectance;
   params.emissive = geom.emission;
   params.specular = geom.specular;
   params.glossiness = geom.shininess;
@@ -373,14 +466,18 @@ void Drawable::UpdateMaterial(const mjvGeom& geom) {
   }
 
   if (geom.segid >= 0) {
-    constexpr double phi1 = 1.61803398874989484820;  // Cached Phi(1).
-    constexpr double coef1 = 1.0 / phi1;
-    const double index = static_cast<double>(geom.segid);
-    const double sample = std::fmod(0.5 + coef1 * index, 1.0);
-    uint32_t segmentation_color = 0x01000000 * sample;
-    const uint8_t red = (segmentation_color >> 16) & 0xff;
+    uint32_t segmentation_color = geom.segid + 1;
+    if (!use_segid_color) {
+      constexpr double phi1 = 1.61803398874989484820;  // Cached Phi(1).
+      constexpr double coef1 = 1.0 / phi1;
+      const double index = static_cast<double>(geom.segid);
+      const double sample = std::fmod(0.5 + coef1 * index, 1.0);
+      segmentation_color = 0x01000000 * sample;
+    }
+
+    const uint8_t red = (segmentation_color >> 0) & 0xff;
     const uint8_t green = (segmentation_color >> 8) & 0xff;
-    const uint8_t blue = (segmentation_color >> 0) & 0xff;
+    const uint8_t blue = (segmentation_color >> 16) & 0xff;
     params.segmentation_color.x = static_cast<float>(red) / 255.0f;
     params.segmentation_color.y = static_cast<float>(green) / 255.0f;
     params.segmentation_color.z = static_cast<float>(blue) / 255.0f;
@@ -394,14 +491,15 @@ void Drawable::UpdateMaterial(const mjvGeom& geom) {
   // the programmatic UVs.
 
   if (textures.color) {
-    if (textures.color->getTarget() == filament::Texture::Sampler::SAMPLER_2D) {
+    if (textures.color->GetFilamentTexture()->getTarget() ==
+        filament::Texture::Sampler::SAMPLER_2D) {
       // For 2D textures, `tex_repeat` specifies how many times the texture
       // image is repeated. The `tex_uniform` flag determines if the repetition
       // is applied at in object space (false) or in world space (true).
       params.uv_scale.x = params.tex_repeat.x;
       params.uv_scale.y = params.tex_repeat.y;
 
-      if (geom.dataid >= 0) {
+      if (geom.dataid >= 0 && geom.type != mjGEOM_PLANE) {
         if (geom.size[0] > mjMINVAL) {
           params.uv_scale.x /= geom.size[0];
         }
@@ -417,17 +515,29 @@ void Drawable::UpdateMaterial(const mjvGeom& geom) {
           params.uv_scale.y *= geom.size[1];
         }
       }
-      if (geom.type == mjGEOM_PLANE) {
-        if (geom.size[0] == 0) {
-          params.uv_scale.x = kInfinitePlaneFakeSize;
-        }
-        if (geom.size[1] == 0) {
-          params.uv_scale.y = kInfinitePlaneFakeSize;
-        }
+      const bool is_infinite_plane =
+          geom.type == mjGEOM_PLANE && (geom.size[0] <= 0 || geom.size[1] <= 0);
+      if (is_infinite_plane) {
+        // Infinite planes are scaled to match the tile size used by
+        // re-centering in engine_vis_visualize.c.
+        const float plane_scale = static_cast<float>(mjMAXPLANEGRID) / 2.0f;
+        const float tile_size_x =
+            GetPlaneTileSize(model, geom.matid, params.tex_repeat.x);
+        const float tile_size_y =
+            GetPlaneTileSize(model, geom.matid, params.tex_repeat.y);
+        params.uv_scale.x = 2.0f * plane_scale / tile_size_x;
+        params.uv_scale.y = 2.0f * plane_scale / tile_size_y;
       }
 
-      params.uv_scale.x = 2 * params.uv_scale.x;
-      params.uv_scale.y = 2 * params.uv_scale.y;
+      // We want to do the equivalent of:
+      //   mjr_setf4(splane, 0.5 * scl.x,  0, 0, -0.5);
+      //   mjr_setf4(tplane, 0, -0.5 * scl.y, 0, -0.5);
+      //   glTexGenfv(GL_S, GL_OBJECT_PLANE, splane);
+      //   glTexGenfv(GL_T, GL_OBJECT_PLANE, tplane);
+      params.uv_scale.x = 0.5f * params.uv_scale.x;
+      params.uv_scale.y = -0.5f * params.uv_scale.y;
+      params.uv_offset.x = -0.5f;
+      params.uv_offset.y = -0.5f;
     } else {
       // For cube maps, if `tex_uniform` is true, then scale the texture so that
       // it covers a 1x1 area of world space rather than the area of the object.
@@ -438,6 +548,12 @@ void Drawable::UpdateMaterial(const mjvGeom& geom) {
       }
     }
   }
+
+  // Apply material multipliers from the model.
+  params.emissive *= model_objs_->GetEmissiveMultiplier();
+  params.specular *= model_objs_->GetSpecularMultiplier();
+  params.glossiness *= model_objs_->GetShininessMultiplier();
+
   material_.UpdateParams(params);
 }
 }  // namespace mujoco

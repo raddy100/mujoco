@@ -17,6 +17,7 @@
 
 #include <string_view>
 
+#include <filament/Box.h>
 #include <filament/Engine.h>
 #include <filament/IndexBuffer.h>
 #include <filament/Texture.h>
@@ -36,25 +37,16 @@ enum class MeshType {
   kHeightField,
 };
 
-// The types of textures stored in the mjModel.
-enum class TextureType {
-  kNormal2d,
-  kCube,
-};
-
 // Generates a filament VertexBuffer for a given mesh in the mjModel.
 filament::VertexBuffer* CreateVertexBuffer(filament::Engine* engine,
                                            const mjModel* model, int id,
-                                           MeshType mesh_type);
+                                           MeshType mesh_type,
+                                           filament::Box* bounds);
 
 // Generates a filament IndexBuffer for a given mesh in the mjModel.
 filament::IndexBuffer* CreateIndexBuffer(filament::Engine* engine,
                                          const mjModel* model, int id,
                                          MeshType mesh_type);
-
-// Generates a filament Texture for a given 2D texture in the mjModel.
-filament::Texture* CreateTexture(filament::Engine* engine, const mjModel* model,
-                                 int id, TextureType texture_type);
 
 // Reads a value with the given name from the mjModel's data sections. The
 // default_value is returned if the named element is not found.
@@ -79,6 +71,9 @@ T ReadElement(const mjModel* model, const char* name, T default_value = T()) {
   } else if constexpr (std::is_arithmetic_v<T>) {
     const mjtNum* ptr = model->numeric_data + model->numeric_adr[id];
     return static_cast<T>(*ptr);
+  } else if constexpr (std::is_enum_v<T>) {
+    const mjtNum* ptr = model->numeric_data + model->numeric_adr[id];
+    return static_cast<T>(static_cast<int>(*ptr));
   } else if constexpr (std::is_same_v<T, filament::math::float2>) {
     const mjtNum* ptr = model->numeric_data + model->numeric_adr[id];
     if (model->numeric_size[id] != 2) mju_error("Invalid numeric size.");

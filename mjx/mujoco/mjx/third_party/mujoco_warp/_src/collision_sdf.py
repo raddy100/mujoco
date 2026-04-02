@@ -15,22 +15,21 @@
 
 from typing import Tuple
 
-import warp as wp
-
-from mujoco.mjx.third_party.mujoco_warp._src import math
-from mujoco.mjx.third_party.mujoco_warp._src.collision_primitive import contact_params
-from mujoco.mjx.third_party.mujoco_warp._src.collision_primitive import geom
-from mujoco.mjx.third_party.mujoco_warp._src.collision_primitive import write_contact
+from mujoco.mjx.third_party.mujoco_warp._src.collision_core import CollisionContext
+from mujoco.mjx.third_party.mujoco_warp._src.collision_core import contact_params
+from mujoco.mjx.third_party.mujoco_warp._src.collision_core import geom_collision_pair
+from mujoco.mjx.third_party.mujoco_warp._src.collision_core import write_contact
 from mujoco.mjx.third_party.mujoco_warp._src.math import make_frame
 from mujoco.mjx.third_party.mujoco_warp._src.ray import ray_mesh
 from mujoco.mjx.third_party.mujoco_warp._src.types import Data
 from mujoco.mjx.third_party.mujoco_warp._src.types import GeomType
 from mujoco.mjx.third_party.mujoco_warp._src.types import Model
 from mujoco.mjx.third_party.mujoco_warp._src.types import vec5
-from mujoco.mjx.third_party.mujoco_warp._src.types import vec8f
+from mujoco.mjx.third_party.mujoco_warp._src.types import vec8
 from mujoco.mjx.third_party.mujoco_warp._src.types import vec8i
 from mujoco.mjx.third_party.mujoco_warp._src.util_misc import halton
 from mujoco.mjx.third_party.mujoco_warp._src.warp_util import event_scope
+import warp as wp
 
 wp.set_module_options({"enable_backward": False})
 
@@ -55,7 +54,8 @@ class VolumeData:
   half_size: wp.vec3
   oct_aabb: wp.array2d(dtype=wp.vec3)
   oct_child: wp.array(dtype=vec8i)
-  oct_coeff: wp.array(dtype=vec8f)
+  oct_coeff: wp.array(dtype=vec8)
+  root: int = 0
   valid: bool = False
 
 
@@ -67,9 +67,9 @@ class MeshData:
   mesh_faceadr: wp.array(dtype=int)
   mesh_face: wp.array(dtype=wp.vec3i)
   data_id: int
-  data_id: int
   pos: wp.vec3
   mat: wp.mat33
+  size: wp.vec3
   pnt: wp.vec3
   vec: wp.vec3
   valid: bool = False
@@ -77,17 +77,18 @@ class MeshData:
 
 @wp.func
 def get_sdf_params(
-  # Model:
-  oct_aabb: wp.array2d(dtype=wp.vec3),
-  oct_child: wp.array(dtype=vec8i),
-  oct_coeff: wp.array(dtype=vec8f),
-  plugin: wp.array(dtype=int),
-  plugin_attr: wp.array(dtype=wp.vec3f),
-  # In:
-  g_type: int,
-  g_size: wp.vec3,
-  plugin_id: int,
-  mesh_id: int,
+    # Model:
+    oct_child: wp.array(dtype=vec8i),
+    oct_aabb: wp.array2d(dtype=wp.vec3),
+    oct_coeff: wp.array(dtype=vec8),
+    mesh_octadr: wp.array(dtype=int),
+    plugin: wp.array(dtype=int),
+    plugin_attr: wp.array(dtype=wp.vec3f),
+    # In:
+    g_type: int,
+    g_size: wp.vec3,
+    plugin_id: int,
+    mesh_id: int,
 ) -> Tuple[wp.vec3, int, VolumeData, MeshData]:
   attributes = g_size
   plugin_index = -1
@@ -98,8 +99,10 @@ def get_sdf_params(
     plugin_index = plugin[plugin_id]
 
   elif g_type == GeomType.SDF and mesh_id != -1:
-    volume_data.center = oct_aabb[mesh_id, 0]
-    volume_data.half_size = oct_aabb[mesh_id, 1]
+    octadr = mesh_octadr[mesh_id]
+    volume_data.center = oct_aabb[octadr, 0]
+    volume_data.half_size = oct_aabb[octadr, 1]
+    volume_data.root = octadr
     volume_data.oct_aabb = oct_aabb
     volume_data.oct_child = oct_child
     volume_data.oct_coeff = oct_coeff
@@ -170,7 +173,7 @@ def grad_sphere(p: wp.vec3) -> wp.vec3:
   if c > 1e-9:
     return p / c
   else:
-    wp.vec3(0.0)
+    return wp.vec3(0.0)
 
 
 @wp.func
@@ -225,13 +228,17 @@ def user_sdf_grad(p: wp.vec3, attr: wp.vec3, sdf_type: int) -> wp.vec3:
 
 @wp.func
 def find_oct(
-  oct_aabb: wp.array2d(dtype=wp.vec3), oct_child: wp.array(dtype=vec8i), p: wp.vec3, grad: bool
-) -> Tuple[int, Tuple[vec8f, vec8f, vec8f]]:
-  stack = int(0)
+    oct_child: wp.array(dtype=vec8i),
+    oct_aabb: wp.array2d(dtype=wp.vec3),
+    p: wp.vec3,
+    grad: bool,
+    root: int,
+) -> Tuple[int, Tuple[vec8, vec8, vec8]]:
+  stack = root
   niter = int(100)
-  rx = vec8f(0.0)
-  ry = vec8f(0.0)
-  rz = vec8f(0.0)
+  rx = vec8(0.0)
+  ry = vec8(0.0)
+  rz = vec8(0.0)
   eps = 1e-6
 
   while niter > 0:
@@ -258,15 +265,17 @@ def find_oct(
     coord = wp.cw_div(p - vmin, vmax - vmin)
 
     # check if the node is a leaf
+    # child indices are relative to root (mesh_octadr offset)
+    child0 = oct_child[node][0]
     if (
-      oct_child[node][0] == -1
-      and oct_child[node][1] == -1
-      and oct_child[node][2] == -1
-      and oct_child[node][3] == -1
-      and oct_child[node][4] == -1
-      and oct_child[node][5] == -1
-      and oct_child[node][6] == -1
-      and oct_child[node][7] == -1
+        child0 == -1
+        and oct_child[node][1] == -1
+        and oct_child[node][2] == -1
+        and oct_child[node][3] == -1
+        and oct_child[node][4] == -1
+        and oct_child[node][5] == -1
+        and oct_child[node][6] == -1
+        and oct_child[node][7] == -1
     ):
       for j in range(8):
         if not grad:
@@ -282,10 +291,12 @@ def find_oct(
       return node, (rx, ry, rz)
 
     # compute which of 8 children to visit next
+    # child indices are stored relative to mesh_octadr, add root offset
     x = 0 if coord[0] < 0.5 else 1
     y = 0 if coord[1] < 0.5 else 1
     z = 0 if coord[2] < 0.5 else 1
-    stack = oct_child[node][4 * z + 2 * y + x]
+    child = oct_child[node][4 * z + 2 * y + x]
+    stack = child + root if child != -1 else -1
 
   wp.print("ERROR: Node not found\n")
   return -1, (rx, ry, rz)
@@ -331,7 +342,13 @@ def box_project(center: wp.vec3, half_size: wp.vec3, xyz: wp.vec3) -> Tuple[floa
 @wp.func
 def sample_volume_sdf(xyz: wp.vec3, volume_data: VolumeData) -> float:
   dist0, point = box_project(volume_data.center, volume_data.half_size, xyz)
-  node, weights = find_oct(volume_data.oct_aabb, volume_data.oct_child, point, grad=False)
+  node, weights = find_oct(
+      volume_data.oct_child,
+      volume_data.oct_aabb,
+      point,
+      grad=False,
+      root=volume_data.root,
+  )
   return dist0 + wp.dot(weights[0], volume_data.oct_coeff[node])
 
 
@@ -348,7 +365,13 @@ def sample_volume_grad(xyz: wp.vec3, volume_data: VolumeData) -> wp.vec3:
     grad_y = (sample_volume_sdf(xyz + dy, volume_data) - f) / h
     grad_z = (sample_volume_sdf(xyz + dz, volume_data) - f) / h
     return wp.vec3(grad_x, grad_y, grad_z)
-  node, weights = find_oct(volume_data.oct_aabb, volume_data.oct_child, point, grad=True)
+  node, weights = find_oct(
+      volume_data.oct_child,
+      volume_data.oct_aabb,
+      point,
+      grad=True,
+      root=volume_data.root,
+  )
   grad_x = wp.dot(weights[0], volume_data.oct_coeff[node])
   grad_y = wp.dot(weights[1], volume_data.oct_coeff[node])
   grad_z = wp.dot(weights[2], volume_data.oct_coeff[node])
@@ -368,31 +391,34 @@ def sdf(type: int, p: wp.vec3, attr: wp.vec3, sdf_type: int, volume_data: Volume
   elif type == GeomType.MESH and mesh_data.valid:
     mesh_data.pnt = p
     mesh_data.vec = -wp.normalize(p)
-    dist = ray_mesh(
+    dist, normal = ray_mesh(
       mesh_data.nmeshface,
       mesh_data.mesh_vertadr,
-      mesh_data.mesh_vert,
       mesh_data.mesh_faceadr,
+      mesh_data.mesh_vert,
       mesh_data.mesh_face,
       mesh_data.data_id,
       mesh_data.pos,
       mesh_data.mat,
+      mesh_data.size,
       mesh_data.pnt,
       mesh_data.vec,
     )
     if dist > wp.norm_l2(p):
-      return -ray_mesh(
+      dist, normal = ray_mesh(
         mesh_data.nmeshface,
         mesh_data.mesh_vertadr,
-        mesh_data.mesh_vert,
         mesh_data.mesh_faceadr,
+        mesh_data.mesh_vert,
         mesh_data.mesh_face,
         mesh_data.data_id,
         mesh_data.pos,
         mesh_data.mat,
+        mesh_data.size,
         mesh_data.pnt,
         -mesh_data.vec,
       )
+      return -dist
     return dist
   elif type == GeomType.SDF:
     if sdf_type == -1:
@@ -417,15 +443,16 @@ def sdf_grad(type: int, p: wp.vec3, attr: wp.vec3, sdf_type: int, volume_data: V
   elif type == GeomType.MESH and mesh_data.valid:
     mesh_data.pnt = p
     mesh_data.vec = -wp.normalize(p)
-    dist = ray_mesh(
+    dist, normal = ray_mesh(
       mesh_data.nmeshface,
       mesh_data.mesh_vertadr,
-      mesh_data.mesh_vert,
       mesh_data.mesh_faceadr,
+      mesh_data.mesh_vert,
       mesh_data.mesh_face,
       mesh_data.data_id,
       mesh_data.pos,
       mesh_data.mat,
+      mesh_data.size,
       mesh_data.pnt,
       mesh_data.vec,
     )
@@ -618,79 +645,76 @@ def gradient_descent(
 
 @wp.kernel
 def _sdf_narrowphase(
-  # Model:
-  nmeshface: int,
-  geom_type: wp.array(dtype=int),
-  geom_condim: wp.array(dtype=int),
-  geom_dataid: wp.array(dtype=int),
-  geom_priority: wp.array(dtype=int),
-  geom_solmix: wp.array2d(dtype=float),
-  geom_solref: wp.array2d(dtype=wp.vec2),
-  geom_solimp: wp.array2d(dtype=vec5),
-  geom_size: wp.array2d(dtype=wp.vec3),
-  geom_aabb: wp.array2d(dtype=wp.vec3),
-  geom_friction: wp.array2d(dtype=wp.vec3),
-  geom_margin: wp.array2d(dtype=float),
-  geom_gap: wp.array2d(dtype=float),
-  hfield_adr: wp.array(dtype=int),
-  hfield_nrow: wp.array(dtype=int),
-  hfield_ncol: wp.array(dtype=int),
-  hfield_size: wp.array(dtype=wp.vec4),
-  hfield_data: wp.array(dtype=float),
-  mesh_vertadr: wp.array(dtype=int),
-  mesh_vertnum: wp.array(dtype=int),
-  mesh_vert: wp.array(dtype=wp.vec3),
-  mesh_faceadr: wp.array(dtype=int),
-  mesh_face: wp.array(dtype=wp.vec3i),
-  mesh_graphadr: wp.array(dtype=int),
-  mesh_graph: wp.array(dtype=int),
-  mesh_polynum: wp.array(dtype=int),
-  mesh_polyadr: wp.array(dtype=int),
-  mesh_polynormal: wp.array(dtype=wp.vec3),
-  mesh_polyvertadr: wp.array(dtype=int),
-  mesh_polyvertnum: wp.array(dtype=int),
-  mesh_polyvert: wp.array(dtype=int),
-  mesh_polymapadr: wp.array(dtype=int),
-  mesh_polymapnum: wp.array(dtype=int),
-  mesh_polymap: wp.array(dtype=int),
-  oct_aabb: wp.array2d(dtype=wp.vec3),
-  oct_child: wp.array(dtype=vec8i),
-  oct_coeff: wp.array(dtype=vec8f),
-  pair_dim: wp.array(dtype=int),
-  pair_solref: wp.array2d(dtype=wp.vec2),
-  pair_solreffriction: wp.array2d(dtype=wp.vec2),
-  pair_solimp: wp.array2d(dtype=vec5),
-  pair_margin: wp.array2d(dtype=float),
-  pair_gap: wp.array2d(dtype=float),
-  pair_friction: wp.array2d(dtype=vec5),
-  # In:
-  plugin: wp.array(dtype=int),
-  plugin_attr: wp.array(dtype=wp.vec3f),
-  geom_plugin_index: wp.array(dtype=int),
-  # Data in:
-  naconmax_in: int,
-  geom_xpos_in: wp.array2d(dtype=wp.vec3),
-  geom_xmat_in: wp.array2d(dtype=wp.mat33),
-  collision_pair_in: wp.array(dtype=wp.vec2i),
-  collision_pairid_in: wp.array(dtype=int),
-  collision_worldid_in: wp.array(dtype=int),
-  ncollision_in: wp.array(dtype=int),
-  # In:
-  sdf_initpoints: int,
-  sdf_iterations: int,
-  # Data out:
-  nacon_out: wp.array(dtype=int),
-  contact_dist_out: wp.array(dtype=float),
-  contact_pos_out: wp.array(dtype=wp.vec3),
-  contact_frame_out: wp.array(dtype=wp.mat33),
-  contact_includemargin_out: wp.array(dtype=float),
-  contact_friction_out: wp.array(dtype=vec5),
-  contact_solref_out: wp.array(dtype=wp.vec2),
-  contact_solreffriction_out: wp.array(dtype=wp.vec2),
-  contact_solimp_out: wp.array(dtype=vec5),
-  contact_dim_out: wp.array(dtype=int),
-  contact_geom_out: wp.array(dtype=wp.vec2i),
-  contact_worldid_out: wp.array(dtype=int),
+    # Model:
+    nmeshface: int,
+    oct_child: wp.array(dtype=vec8i),
+    oct_aabb: wp.array2d(dtype=wp.vec3),
+    oct_coeff: wp.array(dtype=vec8),
+    geom_type: wp.array(dtype=int),
+    geom_condim: wp.array(dtype=int),
+    geom_dataid: wp.array(dtype=int),
+    geom_priority: wp.array(dtype=int),
+    geom_solmix: wp.array2d(dtype=float),
+    geom_solref: wp.array2d(dtype=wp.vec2),
+    geom_solimp: wp.array2d(dtype=vec5),
+    geom_size: wp.array2d(dtype=wp.vec3),
+    geom_aabb: wp.array3d(dtype=wp.vec3),
+    geom_friction: wp.array2d(dtype=wp.vec3),
+    geom_margin: wp.array2d(dtype=float),
+    geom_gap: wp.array2d(dtype=float),
+    mesh_vertadr: wp.array(dtype=int),
+    mesh_vertnum: wp.array(dtype=int),
+    mesh_faceadr: wp.array(dtype=int),
+    mesh_octadr: wp.array(dtype=int),
+    mesh_graphadr: wp.array(dtype=int),
+    mesh_vert: wp.array(dtype=wp.vec3),
+    mesh_face: wp.array(dtype=wp.vec3i),
+    mesh_graph: wp.array(dtype=int),
+    mesh_polynum: wp.array(dtype=int),
+    mesh_polyadr: wp.array(dtype=int),
+    mesh_polynormal: wp.array(dtype=wp.vec3),
+    mesh_polyvertadr: wp.array(dtype=int),
+    mesh_polyvertnum: wp.array(dtype=int),
+    mesh_polyvert: wp.array(dtype=int),
+    mesh_polymapadr: wp.array(dtype=int),
+    mesh_polymapnum: wp.array(dtype=int),
+    mesh_polymap: wp.array(dtype=int),
+    pair_dim: wp.array(dtype=int),
+    pair_solref: wp.array2d(dtype=wp.vec2),
+    pair_solreffriction: wp.array2d(dtype=wp.vec2),
+    pair_solimp: wp.array2d(dtype=vec5),
+    pair_margin: wp.array2d(dtype=float),
+    pair_gap: wp.array2d(dtype=float),
+    pair_friction: wp.array2d(dtype=vec5),
+    plugin: wp.array(dtype=int),
+    plugin_attr: wp.array(dtype=wp.vec3f),
+    geom_plugin_index: wp.array(dtype=int),
+    # Data in:
+    geom_xpos_in: wp.array2d(dtype=wp.vec3),
+    geom_xmat_in: wp.array2d(dtype=wp.mat33),
+    naconmax_in: int,
+    ncollision_in: wp.array(dtype=int),
+    # In:
+    collision_pair_in: wp.array(dtype=wp.vec2i),
+    collision_pairid_in: wp.array(dtype=wp.vec2i),
+    collision_worldid_in: wp.array(dtype=int),
+    sdf_initpoints: int,
+    sdf_iterations: int,
+    # Data out:
+    contact_dist_out: wp.array(dtype=float),
+    contact_pos_out: wp.array(dtype=wp.vec3),
+    contact_frame_out: wp.array(dtype=wp.mat33),
+    contact_includemargin_out: wp.array(dtype=float),
+    contact_friction_out: wp.array(dtype=vec5),
+    contact_solref_out: wp.array(dtype=wp.vec2),
+    contact_solreffriction_out: wp.array(dtype=wp.vec2),
+    contact_solimp_out: wp.array(dtype=vec5),
+    contact_dim_out: wp.array(dtype=int),
+    contact_geom_out: wp.array(dtype=wp.vec2i),
+    contact_worldid_out: wp.array(dtype=int),
+    contact_type_out: wp.array(dtype=int),
+    contact_geomcollisionid_out: wp.array(dtype=int),
+    nacon_out: wp.array(dtype=int),
 ):
   i, contact_tid = wp.tid()
   if i >= sdf_initpoints:
@@ -724,65 +748,46 @@ def _sdf_narrowphase(
     contact_tid,
     worldid,
   )
+
+  geom1, geom2 = geom_collision_pair(
+    geom_type,
+    geom_dataid,
+    geom_size,
+    mesh_vertadr,
+    mesh_vertnum,
+    mesh_graphadr,
+    mesh_vert,
+    mesh_graph,
+    mesh_polynum,
+    mesh_polyadr,
+    mesh_polynormal,
+    mesh_polyvertadr,
+    mesh_polyvertnum,
+    mesh_polyvert,
+    mesh_polymapadr,
+    mesh_polymapnum,
+    mesh_polymap,
+    geom_xpos_in,
+    geom_xmat_in,
+    geoms,
+    worldid,
+  )
+
+  aabb_id = worldid % geom_aabb.shape[0]
   g1 = geoms[0]
   type1 = geom_type[g1]
 
-  geom1_dataid = geom_dataid[g1]
-  geom1 = geom(
-    type1,
-    geom1_dataid,
-    geom_size[worldid, g1],
-    mesh_vertadr,
-    mesh_vertnum,
-    mesh_vert,
-    mesh_graphadr,
-    mesh_graph,
-    mesh_polynum,
-    mesh_polyadr,
-    mesh_polynormal,
-    mesh_polyvertadr,
-    mesh_polyvertnum,
-    mesh_polyvert,
-    mesh_polymapadr,
-    mesh_polymapnum,
-    mesh_polymap,
-    geom_xpos_in[worldid, g1],
-    geom_xmat_in[worldid, g1],
-  )
-
-  geom2_dataid = geom_dataid[g2]
-  geom2 = geom(
-    type2,
-    geom2_dataid,
-    geom_size[worldid, g2],
-    mesh_vertadr,
-    mesh_vertnum,
-    mesh_vert,
-    mesh_graphadr,
-    mesh_graph,
-    mesh_polynum,
-    mesh_polyadr,
-    mesh_polynormal,
-    mesh_polyvertadr,
-    mesh_polyvertnum,
-    mesh_polyvert,
-    mesh_polymapadr,
-    mesh_polymapnum,
-    mesh_polymap,
-    geom_xpos_in[worldid, g2],
-    geom_xmat_in[worldid, g2],
-  )
   g1_plugin = geom_plugin_index[g1]
   g2_plugin = geom_plugin_index[g2]
 
   g1_to_g2_rot = wp.transpose(geom1.rot) * geom2.rot
   g1_to_g2_pos = wp.transpose(geom1.rot) * (geom2.pos - geom1.pos)
-  aabb_pos = geom_aabb[g1, 0]
-  aabb_size = geom_aabb[g1, 1]
+  aabb_pos = geom_aabb[aabb_id, g1, 0]
+  aabb_size = geom_aabb[aabb_id, g1, 1]
   identity = wp.identity(3, dtype=float)
   aabb1 = transform_aabb(aabb_pos, aabb_size, wp.vec3(0.0), identity)
-  aabb_pos = geom_aabb[g2, 0]
-  aabb_size = geom_aabb[g2, 1]
+  aabb_pos = geom_aabb[aabb_id, g2, 0]
+  aabb_size = geom_aabb[aabb_id, g2, 1]
   aabb2 = transform_aabb(aabb_pos, aabb_size, g1_to_g2_pos, g1_to_g2_rot)
   aabb_intersection = AABB()
   aabb_intersection.min = wp.max(aabb1.min, aabb2.min)
@@ -794,11 +799,29 @@ def _sdf_narrowphase(
   rot1 = geom1.rot
 
   attr1, g1_plugin_id, volume_data1, mesh_data1 = get_sdf_params(
-    oct_aabb, oct_child, oct_coeff, plugin, plugin_attr, type1, geom1.size, g1_plugin, geom_dataid[g1]
+      oct_child,
+      oct_aabb,
+      oct_coeff,
+      mesh_octadr,
+      plugin,
+      plugin_attr,
+      type1,
+      geom1.size,
+      g1_plugin,
+      geom_dataid[g1],
   )
 
   attr2, g2_plugin_id, volume_data2, mesh_data2 = get_sdf_params(
-    oct_aabb, oct_child, oct_coeff, plugin, plugin_attr, type2, geom2.size, g2_plugin, geom_dataid[g2]
+      oct_child,
+      oct_aabb,
+      oct_coeff,
+      mesh_octadr,
+      plugin,
+      plugin_attr,
+      type2,
+      geom2.size,
+      g2_plugin,
+      geom_dataid[g2],
   )
 
   mesh_data1.nmeshface = nmeshface
@@ -809,6 +832,7 @@ def _sdf_narrowphase(
   mesh_data1.data_id = geom_dataid[g1]
   mesh_data1.pos = geom1.pos
   mesh_data1.mat = geom1.rot
+  mesh_data1.size = geom1.size
   mesh_data1.pnt = wp.vec3(-1.0)
   mesh_data1.vec = wp.vec3(0.0)
   mesh_data1.valid = True
@@ -821,6 +845,7 @@ def _sdf_narrowphase(
   mesh_data2.data_id = geom_dataid[g2]
   mesh_data2.pos = geom2.pos
   mesh_data2.mat = geom2.rot
+  mesh_data2.size = geom2.size
   mesh_data2.pnt = wp.vec3(-1.0)
   mesh_data2.vec = wp.vec3(0.0)
   mesh_data2.valid = True
@@ -851,6 +876,7 @@ def _sdf_narrowphase(
   )
   write_contact(
     naconmax_in,
+    0,
     dist,
     pos,
     make_frame(n),
@@ -862,8 +888,8 @@ def _sdf_narrowphase(
     solreffriction,
     solimp,
     geoms,
+    collision_pairid_in[contact_tid],
     worldid,
-    nacon_out,
     contact_dist_out,
     contact_pos_out,
     contact_frame_out,
@@ -875,84 +901,85 @@ def _sdf_narrowphase(
     contact_dim_out,
     contact_geom_out,
     contact_worldid_out,
+    contact_type_out,
+    contact_geomcollisionid_out,
+    nacon_out,
   )
 
 
 @event_scope
-def sdf_narrowphase(m: Model, d: Data):
+def sdf_narrowphase(m: Model, d: Data, ctx: CollisionContext):
   wp.launch(
-    _sdf_narrowphase,
-    dim=(m.opt.sdf_initpoints, d.naconmax),
-    inputs=[
-      m.nmeshface,
-      m.geom_type,
-      m.geom_condim,
-      m.geom_dataid,
-      m.geom_priority,
-      m.geom_solmix,
-      m.geom_solref,
-      m.geom_solimp,
-      m.geom_size,
-      m.geom_aabb,
-      m.geom_friction,
-      m.geom_margin,
-      m.geom_gap,
-      m.hfield_adr,
-      m.hfield_nrow,
-      m.hfield_ncol,
-      m.hfield_size,
-      m.hfield_data,
-      m.mesh_vertadr,
-      m.mesh_vertnum,
-      m.mesh_vert,
-      m.mesh_faceadr,
-      m.mesh_face,
-      m.mesh_graphadr,
-      m.mesh_graph,
-      m.mesh_polynum,
-      m.mesh_polyadr,
-      m.mesh_polynormal,
-      m.mesh_polyvertadr,
-      m.mesh_polyvertnum,
-      m.mesh_polyvert,
-      m.mesh_polymapadr,
-      m.mesh_polymapnum,
-      m.mesh_polymap,
-      m.oct_aabb,
-      m.oct_child,
-      m.oct_coeff,
-      m.pair_dim,
-      m.pair_solref,
-      m.pair_solreffriction,
-      m.pair_solimp,
-      m.pair_margin,
-      m.pair_gap,
-      m.pair_friction,
-      m.plugin,
-      m.plugin_attr,
-      m.geom_plugin_index,
-      d.naconmax,
-      d.geom_xpos,
-      d.geom_xmat,
-      d.collision_pair,
-      d.collision_pairid,
-      d.collision_worldid,
-      d.ncollision,
-      m.opt.sdf_initpoints,
-      m.opt.sdf_iterations,
-    ],
-    outputs=[
-      d.nacon,
-      d.contact.dist,
-      d.contact.pos,
-      d.contact.frame,
-      d.contact.includemargin,
-      d.contact.friction,
-      d.contact.solref,
-      d.contact.solreffriction,
-      d.contact.solimp,
-      d.contact.dim,
-      d.contact.geom,
-      d.contact.worldid,
-    ],
+      _sdf_narrowphase,
+      dim=(m.opt.sdf_initpoints, d.naconmax),
+      inputs=[
+          m.nmeshface,
+          m.oct_child,
+          m.oct_aabb,
+          m.oct_coeff,
+          m.geom_type,
+          m.geom_condim,
+          m.geom_dataid,
+          m.geom_priority,
+          m.geom_solmix,
+          m.geom_solref,
+          m.geom_solimp,
+          m.geom_size,
+          m.geom_aabb,
+          m.geom_friction,
+          m.geom_margin,
+          m.geom_gap,
+          m.mesh_vertadr,
+          m.mesh_vertnum,
+          m.mesh_faceadr,
+          m.mesh_octadr,
+          m.mesh_graphadr,
+          m.mesh_vert,
+          m.mesh_face,
+          m.mesh_graph,
+          m.mesh_polynum,
+          m.mesh_polyadr,
+          m.mesh_polynormal,
+          m.mesh_polyvertadr,
+          m.mesh_polyvertnum,
+          m.mesh_polyvert,
+          m.mesh_polymapadr,
+          m.mesh_polymapnum,
+          m.mesh_polymap,
+          m.pair_dim,
+          m.pair_solref,
+          m.pair_solreffriction,
+          m.pair_solimp,
+          m.pair_margin,
+          m.pair_gap,
+          m.pair_friction,
+          m.plugin,
+          m.plugin_attr,
+          m.geom_plugin_index,
+          d.geom_xpos,
+          d.geom_xmat,
+          d.naconmax,
+          d.ncollision,
+          ctx.collision_pair,
+          ctx.collision_pairid,
+          ctx.collision_worldid,
+          m.opt.sdf_initpoints,
+          m.opt.sdf_iterations,
+      ],
+      outputs=[
+          d.contact.dist,
+          d.contact.pos,
+          d.contact.frame,
+          d.contact.includemargin,
+          d.contact.friction,
+          d.contact.solref,
+          d.contact.solreffriction,
+          d.contact.solimp,
+          d.contact.dim,
+          d.contact.geom,
+          d.contact.worldid,
+          d.contact.type,
+          d.contact.geomcollisionid,
+          d.nacon,
+      ],
   )

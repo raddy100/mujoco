@@ -14,6 +14,7 @@
 
 #include "experimental/filament/filament/renderables.h"
 
+#include <cstdint>
 #include <optional>
 
 #include <filament/Engine.h>
@@ -27,7 +28,7 @@ namespace mujoco {
 
 Renderables::Renderables(filament::Engine* engine) : engine_(engine) {}
 
-Renderables::~Renderables() {
+Renderables::~Renderables() noexcept {
   while (!entities_.empty()) {
     RemoveLast();
   }
@@ -49,7 +50,10 @@ void Renderables::RemoveLast() {
   em.destroy(entity);
   entities_.pop_back();
 
-  UpdateBuffers(owned_buffers_.size() - 1, std::nullopt);
+  if (owned_buffers_.back().owned) {
+    engine_->destroy(owned_buffers_.back().buffers.vertex_buffer);
+    engine_->destroy(owned_buffers_.back().buffers.index_buffer);
+  }
   owned_buffers_.pop_back();
 }
 
@@ -59,7 +63,7 @@ void Renderables::Update(int index, const FilamentBuffers& buffers) {
   }
   utils::Entity& entity = entities_[index];
   UpdateEntity(entity, buffers);
-  UpdateBuffers(index, std::nullopt);
+  UpdateBuffers(index, buffers, false);
 }
 
 void Renderables::Update(int index, FilamentBuffers&& buffers) {
@@ -68,19 +72,19 @@ void Renderables::Update(int index, FilamentBuffers&& buffers) {
   }
   utils::Entity& entity = entities_[index];
   UpdateEntity(entity, buffers);
-  UpdateBuffers(index, buffers);
+  UpdateBuffers(index, buffers, true);
 }
 
 void Renderables::Append(const FilamentBuffers& buffers) {
   utils::Entity entity = CreateEntity(buffers);
   entities_.push_back(entity);
-  owned_buffers_.push_back(std::nullopt);
+  owned_buffers_.push_back({.owned = false, .buffers = buffers});
 }
 
 void Renderables::Append(FilamentBuffers&& buffers) {
   utils::Entity entity = CreateEntity(buffers);
   entities_.push_back(entity);
-  owned_buffers_.push_back(buffers);
+  owned_buffers_.push_back({.owned = true, .buffers = buffers});
 }
 
 utils::Entity Renderables::CreateEntity(const FilamentBuffers& buffers) {
@@ -101,12 +105,16 @@ utils::Entity Renderables::CreateEntity(const FilamentBuffers& buffers) {
   if (material_instance_) {
     builder.material(0, material_instance_);
   }
-  builder.boundingBox(buffers.bounds)
-      .culling(false)
-      .castShadows(true)
-      .receiveShadows(true)
-      .layerMask(1, visible_ ? 1 : 0)
-      .screenSpaceContactShadows(true);
+  if (buffers.bounds.has_value()) {
+    builder.boundingBox(buffers.bounds.value());
+  } else {
+    builder.culling(false);
+  }
+  builder.castShadows(cast_shadows_);
+  builder.receiveShadows(receive_shadows_);
+  builder.layerMask(0xff, layer_mask_);
+  builder.priority(priority_);
+  builder.screenSpaceContactShadows(true);;
 
   builder.build(*engine_, entity);
   if (assigned_scene_) {
@@ -129,16 +137,16 @@ void Renderables::UpdateEntity(utils::Entity entity,
                    buffers.index_buffer->getIndexCount());
 }
 
-void Renderables::UpdateBuffers(int index,
-                                std::optional<FilamentBuffers> buffers) {
+void Renderables::UpdateBuffers(int index, FilamentBuffers buffers, bool owned) {
   if (index < 0 || index >= owned_buffers_.size()) {
     mju_error("Invalid index %d for renderable.", index);
   }
-  if (owned_buffers_[index].has_value()) {
-    engine_->destroy(owned_buffers_[index]->vertex_buffer);
-    engine_->destroy(owned_buffers_[index]->index_buffer);
+  if (owned_buffers_[index].owned) {
+    engine_->destroy(owned_buffers_[index].buffers.vertex_buffer);
+    engine_->destroy(owned_buffers_[index].buffers.index_buffer);
   }
-  owned_buffers_[index] = buffers;
+  owned_buffers_[index].buffers = buffers;
+  owned_buffers_[index].owned = owned;
 }
 
 void Renderables::AddToScene(filament::Scene* scene) {
@@ -177,23 +185,66 @@ void Renderables::SetMaterialInstance(
   }
 }
 
-void Renderables::Hide() {
-  if (visible_) {
+void Renderables::SetLayerMask(std::uint8_t mask) {
+  if (mask != layer_mask_) {
+    layer_mask_ = mask;
+
     filament::RenderableManager& rm = engine_->getRenderableManager();
     for (utils::Entity& entity : entities_) {
-      rm.setLayerMask(rm.getInstance(entity), 1, 0);
+      rm.setLayerMask(rm.getInstance(entity), 0xff, layer_mask_);
     }
-    visible_ = false;
   }
 }
 
-void Renderables::Show() {
-  if (!visible_) {
+void Renderables::SetPriority(std::uint8_t priority) {
+  if (priority != priority_) {
+    priority_ = priority;
+
     filament::RenderableManager& rm = engine_->getRenderableManager();
     for (utils::Entity& entity : entities_) {
-      rm.setLayerMask(rm.getInstance(entity), 1, 1);
+      rm.setPriority(rm.getInstance(entity), priority_);
     }
-    visible_ = true;
+  }
+}
+
+void Renderables::SetCastShadows(bool cast_shadows) {
+  if (cast_shadows_ != cast_shadows) {
+    cast_shadows_ = cast_shadows;
+
+    filament::RenderableManager& rm = engine_->getRenderableManager();
+    for (utils::Entity& entity : entities_) {
+      rm.setCastShadows(rm.getInstance(entity), cast_shadows_);
+    }
+  }
+}
+
+void Renderables::SetReceiveShadows(bool receive_shadows) {
+  if (receive_shadows_ != receive_shadows) {
+    receive_shadows_ = receive_shadows;
+
+    filament::RenderableManager& rm = engine_->getRenderableManager();
+    for (utils::Entity& entity : entities_) {
+      rm.setReceiveShadows(rm.getInstance(entity), receive_shadows_);
+    }
+  }
+}
+
+void Renderables::SetWireframe(bool wireframe) {
+  static constexpr auto kWireframeType =
+      filament::RenderableManager::PrimitiveType::LINES;
+
+  if (wireframe != wireframe_) {
+    wireframe_ = wireframe;
+
+    filament::RenderableManager& rm = engine_->getRenderableManager();
+    for (int i = 0; i < entities_.size(); ++i) {
+      utils::Entity& entity = entities_[i];
+      FilamentBuffers& buffers = owned_buffers_[i].buffers;
+      rm.setGeometryAt(rm.getInstance(entity), 0,
+                      wireframe_ ? kWireframeType : buffers.type,
+                      buffers.vertex_buffer, buffers.index_buffer, 0,
+                      buffers.index_buffer->getIndexCount());
+    }
   }
 }
 

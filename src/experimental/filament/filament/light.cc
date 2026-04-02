@@ -14,6 +14,8 @@
 
 #include "experimental/filament/filament/light.h"
 
+#include <numbers>
+
 #include <filament/Engine.h>
 #include <filament/LightManager.h>
 #include <filament/Scene.h>
@@ -21,12 +23,11 @@
 #include <utils/Entity.h>
 #include <utils/EntityManager.h>
 #include <mujoco/mujoco.h>
-#include "experimental/filament/filament/object_manager.h"
 
 namespace mujoco {
 
-Light::Light(ObjectManager* object_mgr, const Params& params)
-    : engine_(object_mgr->GetEngine()), params_(params) {
+Light::Light(filament::Engine* engine, const Params& params)
+    : engine_(engine), params_(params) {
   filament::LightManager::Type type;
   switch (params.type) {
     case mjLIGHT_SPOT:
@@ -55,9 +56,10 @@ Light::Light(ObjectManager* object_mgr, const Params& params)
   builder.castShadows(params.castshadow);
   if (type == filament::LightManager::Type::FOCUSED_SPOT) {
     if (params.headlight) {
-      builder.spotLightCone(0, M_PI / 2.0f);
+      builder.spotLightCone(0, std::numbers::pi / 2.0f);
     } else {
-      builder.spotLightCone(0, params.spot_cone_angle * M_PI / 180.0f);
+      builder.spotLightCone(0,
+                            params.spot_cone_angle * std::numbers::pi / 180.0f);
     }
   }
   if (type != filament::LightManager::Type::DIRECTIONAL) {
@@ -68,6 +70,12 @@ Light::Light(ObjectManager* object_mgr, const Params& params)
   opts.shadowCascades =
       type == filament::LightManager::Type::DIRECTIONAL ? 4 : 1;
   opts.shadowBulbRadius = params.bulbradius;
+  opts.mapSize = params.shadow_map_size;
+  if (params.vsm_blur_width > 0.0f) {
+    opts.vsm.elvsm = true;
+    opts.vsm.blurWidth = params.vsm_blur_width;
+  }
+
   builder.shadowOptions(opts);
 
   entity_ = utils::EntityManager::get().create();
