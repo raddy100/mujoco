@@ -30,8 +30,16 @@ layouts, and rendering pipelines so that code can be generated with minimal ambi
 16. [Implementation Checklist](#16-implementation-checklist)
 17. [IPC Test Server](#17-ipc-test-server)
 18. [Video Recording](#18-video-recording)
-19. [Scope Status](#19-scope-status)
-20. [Known Requirements & Invariants](#20-known-requirements--invariants)
+19. [Simulation Speed Presets](#19-simulation-speed-presets)
+20. [Scope Status](#20-scope-status)
+21. [Known Requirements & Invariants](#21-known-requirements--invariants)
+    - [21.1 Junction–Overlap Invariant](#201-junction-overlap-invariant)
+    - [21.2 Atomic Undo Invariant](#202-atomic-undo-invariant)
+    - [21.3 UI Click-Through Prevention](#203-ui-click-through-prevention)
+    - [21.4 Multi-Chain Color Integrity](#204-multi-chain-color-integrity)
+    - [21.5 `uistate.button` Must Be Set](#205-uistatebutton-must-be-set)
+    - [21.6 Turn-Block Junction Invariant](#216-turn-block-junction-invariant)
+    - [21.7 Ray-Pick Camera Consistency Invariant](#217-ray-pick-camera-consistency-invariant)
 
 ---
 
@@ -693,13 +701,27 @@ void AddFloorGeom(mjvScene& scn, const ChainWorld& world) {
 ### 6.4 Ghost Preview
 
 The ghost shows where the next block will be placed. It uses the active chain's head
-position + direction offset:
+position + direction offset, then **walks forward through any already-occupied cells**
+(junctions) until it finds a free cell — mirroring the same skip logic in `PlaceBlock`.
+
+**Turn-block rule:** If any cell encountered while walking forward has `is_turn == true`,
+the ghost is suppressed entirely (no wireframe is drawn). Turn blocks are off-limits as
+junction or landing targets.
 
 ```cpp
-void AddGhostGeom(mjvScene& scn, const ChainWorld& world, const Chain& chain) {
+void AddGhostGeom(AppState& app, mjvScene& scn, const ChainWorld& world, const Chain& chain) {
     if (scn.ngeom >= scn.maxgeom) return;
 
-    IVec3 ghost_pos = chain.Head() + FaceToOffset(chain.head_direction);
+    IVec3 dir_step = FaceToOffset(chain.head_direction);
+    IVec3 ghost_pos = chain.Head() + dir_step;
+
+    // Walk through occupied cells, checking for turn-block blockage
+    while (world.grid.count(ghost_pos) > 0) {
+        const GridCell& cell = world.grid.at(ghost_pos);
+        if (cell.is_turn) return;  // turn block: suppress ghost entirely
+        ghost_pos = ghost_pos + dir_step;
+    }
+
     mjtNum wpos[3];
     world.GridToWorld(ghost_pos, wpos);
 
@@ -713,6 +735,9 @@ void AddGhostGeom(mjvScene& scn, const ChainWorld& world, const Chain& chain) {
     scn.ngeom++;
 }
 ```
+
+The **IPC `get_state` response** mirrors this logic: the `"ghost"` field is set to `null`
+when a turn block would block the ghost, rather than reporting a position beyond the turn.
 
 ### 6.5 Head Marker (Small Sphere)
 
@@ -1633,52 +1658,93 @@ bool StartNewChainFromBlock(AppState& app, const IVec3& junction_pos) {
 
 ### 9.7 Ray-Pick Block Selection
 
-For clicking on blocks during `NEW_CHAIN_PICK` mode. Uses a simple ray-vs-AABB test
-against the grid:
+For clicking on blocks during `NEW_CHAIN_PICK` mode and for the hover highlight during
+cursor movement. Uses a slab ray-vs-AABB test against all occupied grid cells.
+
+#### Camera convention — critical correctness requirement
+
+The camera position **must exactly match** `UpdateBuildCamera()` in `main.cc`. Both use
+MuJoCo's `mjvCamera` spherical coordinates where **azimuth is measured from the +X axis
+toward +Y**:
+
+```
+eye_X = lookat[0] - dist · cos(el) · cos(az)   ← cos(az) for X
+eye_Y = lookat[1] - dist · cos(el) · sin(az)   ← sin(az) for Y
+eye_Z = lookat[2] - dist · sin(el)              ← minus sign
+```
+
+> ⚠️ **Common pitfall:** Swapping `sin(az)` and `cos(az)` between X and Y, or negating the
+> Z term, causes the picking ray to be in a completely different position than the render
+> camera. This manifests as blocks feeling "mirrored" and "shifted" from the cursor —
+> clicking north of a block selects it, clicking on it selects nothing. Always derive the
+> eye position from `UpdateBuildCamera` and keep both implementations in sync.
+
+#### NDC conversion and FOV
+
+Mouse pixel coordinates (0=top-left, fb_width/fb_height=bottom-right) are converted to
+NDC and combined with the camera basis vectors:
 
 ```cpp
-bool RayPickBlock(const AppState& app, double mouse_x, double mouse_y, IVec3& out) {
-    int fbw, fbh;
-    // Get framebuffer size from the current context
-    // (passed in or obtained from GLFW)
+// Y flip: screen Y=0 is top, NDC Y=+1 is top
+double ndx = (2.0 * mouse_x / fb_width)  - 1.0;
+double ndy = 1.0 - (2.0 * mouse_y / fb_height);
 
-    // Compute ray from camera through pixel
-    // MuJoCo provides: mjv_select() but it requires a model.
-    // Instead, manually compute camera ray from cam.lookat, cam.azimuth,
-    // cam.elevation, cam.distance and the pixel coordinates.
+// FOV matches UpdateBuildCamera: 45° total (22.5° half-angle)
+double fov_y   = 45.0 * mjPI / 180.0;
+double aspect  = (double)fb_width / fb_height;
+double tan_fov = std::tan(fov_y * 0.5);
 
-    // For each occupied grid cell, test ray-AABB intersection
-    // Return the closest hit.
+double rd[3] = {
+    fwd[0] + ndx * aspect * tan_fov * right[0] + ndy * tan_fov * true_up[0],
+    ...
+};
+```
 
-    double closest_t = 1e30;
-    bool found = false;
+Camera basis (`right`, `true_up`) is derived via cross-products from the forward vector and
+a `{0,0,1}` seed — this Gram-Schmidt approach yields the same `right`/`true_up` as
+`UpdateBuildCamera` at all non-polar elevation angles.
 
-    for (const auto& [pos, cell] : app.world.grid) {
-        double wpos[3];
-        app.world.GridToWorld(pos, wpos);
-        double half = app.world.HalfSize();
+#### Full implementation
 
-        double t;
-        if (RayAABBIntersect(ray_origin, ray_dir,
-                             wpos[0]-half, wpos[1]-half, wpos[2]-half,
-                             wpos[0]+half, wpos[1]+half, wpos[2]+half, t)) {
-            if (t < closest_t) {
-                closest_t = t;
-                out = pos;
-                found = true;
-            }
-        }
-    }
-    return found;
+```cpp
+bool RayPickBlock(const AppState& app, double mouse_x, double mouse_y,
+                  int fb_width, int fb_height, IVec3& out) {
+    if (fb_width <= 0 || fb_height <= 0) return false;
+
+    const mjvCamera& cam = app.cam;
+    double az  = cam.azimuth   * mjPI / 180.0;
+    double el  = cam.elevation * mjPI / 180.0;
+    double dist = cam.distance;
+    double ca = std::cos(az), sa = std::sin(az);
+    double ce = std::cos(el), se = std::sin(el);
+
+    // Eye position — same formula as UpdateBuildCamera
+    double cx = cam.lookat[0] - dist * ce * ca;
+    double cy = cam.lookat[1] - dist * ce * sa;
+    double cz = cam.lookat[2] - dist * se;
+
+    // Forward = lookat - eye (normalized)
+    double fwd[3] = { cam.lookat[0]-cx, cam.lookat[1]-cy, cam.lookat[2]-cz };
+    // ... normalize, compute right = fwd×up, true_up = right×fwd ...
+
+    double ndx = (2.0 * mouse_x / fb_width)  - 1.0;
+    double ndy = 1.0 - (2.0 * mouse_y / fb_height);
+
+    double fov_y = 45.0 * mjPI / 180.0;
+    double aspect = (double)fb_width / fb_height;
+    double tan_fov = std::tan(fov_y * 0.5);
+
+    double ro[3] = {cx, cy, cz};
+    double rd[3] = { fwd[0] + ndx*aspect*tan_fov*right[0] + ndy*tan_fov*true_up[0], ... };
+    // ... normalize rd, then iterate grid cells with RayAABBIntersect ...
 }
 ```
 
-**Note:** Implementing `RayAABBIntersect()` is a standard slab method. Also implement
-camera-ray computation from `mjvCamera` fields (`lookat`, `azimuth`, `elevation`,
-`distance`).
+#### Hover highlight in NEW_CHAIN_PICK mode
 
-Alternatively, use a simpler approach: `mjv_select()` works on `mjvScene` geoms when a
-model is present. Since we don't have a model, the manual ray-AABB approach is required.
+`MouseMoveCallback` calls `RayPickBlock` on every cursor movement (no button held).
+If the closest hit block has `is_turn == true`, it is **not** highlighted — turn blocks
+are off-limits as new-chain anchors and must never appear selected.
 
 ---
 
@@ -2530,14 +2596,16 @@ Only valid in `SIMULATE` mode. Returns `{"ok": false, "error": "not in simulatio
 ### 14.1 Physics Constants (from progui reference)
 
 ```cpp
-// chainmaker.h or a dedicated constants section
+// chainmaker.h — compile-time physics constants
 
 // Joint damping — resists angular velocity at each ball joint
 constexpr double kJointDamping = 0.15;
 
-// Contact solver parameters
-constexpr double kSolref[2] = {0.15, 0.7};    // timeconst, dampratio
-constexpr double kSolimp[5] = {0.9, 0.95, 0.001, 0.5, 2.0};
+// Contact solver parameters — overdamped (solref[1] > 1) eliminates bounce;
+// small solref[0] creates near-rigid contacts.
+// These are baseline defaults; ApplySimPreset() overrides solref/solimp per-preset.
+constexpr double kSolref[2] = {0.005, 2.0};   // {timeconst, dampratio} — stiff, overdamped
+constexpr double kSolimp[5] = {0.9, 0.999, 0.001, 0.5, 2.0};  // dmax=0.999 → 99.9% penetration resistance
 
 // Geom margin for collision detection
 constexpr double kGeomMargin = 0.0;
@@ -2558,6 +2626,15 @@ constexpr int kMaxSceneGeoms = 20000;
 // UI panel width
 constexpr int kUIWidth = 220;
 ```
+
+**Contact stiffness rationale:** `solref[0]` must be ≥ 2× the simulation timestep for
+stability. The per-preset values in §19.3 maintain this margin:
+
+| Preset | solref[0] | timestep | ratio |
+|--------|-----------|----------|-------|
+| Accurate | 0.005 | 0.002 | 2.5× ✓ |
+| Balanced | 0.010 | 0.003 | 3.3× ✓ |
+| Fast | 0.020 | 0.005 | 4.0× ✓ |
 
 ### 14.2 SpawnFace Name Helper
 
@@ -3144,14 +3221,18 @@ The **Sim Speed** cycling button (right-side UI panel, build and simulate modes)
 user switch between three physics-accuracy/performance presets. Clicking cycles forward:
 **Accurate → Balanced → Fast → Accurate …**
 
-| Preset | Solver | Timestep | Iterations | Contact geom |
-|--------|--------|----------|------------|--------------|
-| Accurate | Newton | 0.002 s | 20 | Box corners (4 per block) |
-| Balanced | CG | 0.005 s | 15 | Box corners (4 per block) |
-| Fast | CG | 0.005 s | 15 | Sphere (1 per block) |
+| Preset | Solver | Timestep | Iterations | Contact geom | solref[0] |
+|--------|--------|----------|------------|--------------|-----------|
+| Accurate | Newton | 0.002 s | **50** | Box corners | 0.005 |
+| Balanced | CG | 0.003 s | **25** | Box corners | 0.010 |
+| Fast | CG | 0.005 s | **20** | Sphere | 0.020 |
 
 Default on program start and after load: **Accurate** (index 0). The preset is
 **saved in the JSON chain file** (`"sim_preset": 0/1/2`) and restored on load.
+
+**Why higher iteration counts?** Near-rigid contacts (`solref[0]=0.005`) need more solver
+iterations to converge. Accurate uses Newton (higher per-iteration cost but faster
+convergence), so 50 iterations is safe. CG is cheaper per-step so 25/20 is sufficient.
 
 ### 19.2 Dual-Geom Architecture
 
@@ -3169,21 +3250,40 @@ shape is purely cosmetic.
 ### 19.3 `ApplySimPreset()` — Runtime Switching
 
 `ApplySimPreset(AppState&)` (declared in `chainmaker_sim.h`) patches `m->opt` fields
-at runtime — **no recompile required**:
+and `m->geom_solref`/`m->geom_solimp` at runtime — **no recompile required**:
 
 ```cpp
-// Writes directly into live mjModel::opt
-m->opt.solver     = kSimPresets[p].solver;    // mjSOL_NEWTON or mjSOL_CG
-m->opt.timestep   = kSimPresets[p].timestep;
-m->opt.iterations = kSimPresets[p].iterations;
+// kSimPresets table — one entry per preset
+struct PresetParams {
+    int    solver;        // mjSOL_NEWTON or mjSOL_CG
+    double timestep;
+    int    iterations;
+    bool   use_sphere;    // true → Fast (sphere geoms), false → Accurate/Balanced (box)
+    double solref0;       // contact time-constant (must be ≥ 2× timestep)
+    double solref1;       // contact damping ratio (> 1.0 = overdamped, no bounce)
+    double solimp_dmax;   // penetration resistance (0.95–0.999)
+};
+
+// Applied fields per preset:
+m->opt.solver     = params.solver;
+m->opt.timestep   = params.timestep;
+m->opt.iterations = params.iterations;
+
+// Patch every non-floor geom's contact parameters
+for (int j = 0; j < m->ngeom; j++) {
+    if (m->geom_bodyid[j] == 0) continue;  // skip worldbody/floor
+    m->geom_solref[j*2+0] = params.solref0;
+    m->geom_solref[j*2+1] = params.solref1;
+    m->geom_solimp[j*5+1] = params.solimp_dmax;  // dmax slot
+    // Toggle contact type: box or sphere active
+    m->geom_contype[j] = (is_sphere_geom(j) == params.use_sphere) ? 1 : 0;
+}
 ```
 
-For **Fast** mode it additionally sets:
-- `m->geom_contype[j] = 1` on all sphere geoms (enable contact)
-- `m->geom_contype[j] = 0` on all box geoms (disable contact)
-
-For **Accurate/Balanced** modes the logic is reversed: box geoms get `contype=1`,
-sphere geoms get `contype=0`.
+**Why patch `geom_solref` at runtime?** The Fast preset uses `solref[0]=0.020` which
+is 4× the Fast timestep (0.005 s). Without per-preset contact stiffness, the global
+`kSolref[0]=0.005` would equal the Fast timestep, violating the 2× stability margin
+and causing the simulation to explode and restart in a loop.
 
 `ApplySimPreset()` is called:
 - By `EnterSimulation()` after `mj_makeData` — sets initial preset before first `mj_step`.
@@ -3208,13 +3308,14 @@ User clicks "Sim Speed: Accurate"
 
 ### 19.5 Profiler Overlay Location
 
-The simulation profiler overlay is rendered at **`mjGRID_BOTTOMLEFT`** to avoid
-overlapping the right-side UI panel. Two modes (toggled with **P** key):
+The simulation profiler overlay is rendered at **`mjGRID_TOPLEFT`** to keep it visible
+and away from both the right-side UI panel and the floor of the simulation. Two modes
+(toggled with **P** key):
 
 | Mode | Location | Content |
 |------|----------|---------|
-| Compact (default) | Bottom-left | One-liner: step ms, contacts, RT ratio, recording tag |
-| Full (P key) | Bottom-left | Per-category breakdown: collision %, solver %, step %, RT ratio, preset name |
+| Compact (default) | Top-left | One-liner: step ms, contacts, RT ratio, recording tag |
+| Full (P key) | Top-left | Per-category breakdown: collision %, solver %, step %, RT ratio, preset name |
 
 ## 20. Scope Status
 
@@ -3289,3 +3390,44 @@ explicitly set to the correct `mjtButton` enum before every `mjui_event` call.
 
 **Enforcement:** `MouseButtonCallback` translates GLFW button code → `mjtButton` before
 calling `mjui_event`. See §8.2 and §8.6 for the exact translation.
+
+### 21.6 Turn-Block Junction Invariant
+
+**Requirement:** Turn blocks are **completely off-limits** as junction anchors, chain-start
+points, or tunneling targets. A block that is a turn block for one chain can never have any
+other chain registered on it, regardless of axis.
+
+**Why it matters:** A turn block encodes a direction change; its entry and exit axes are
+both occupied by the same chain. Allowing another chain to junction on it would corrupt the
+turn encoding, produce invalid body hierarchies during compilation, and confuse the user
+about which block they can branch from.
+
+**Enforcement layer (all four checkpoints must agree):**
+
+| Location | Check | Effect |
+|----------|-------|--------|
+| `PlaceBlock()` (walk loop) | `if (cell.is_turn) return TARGET_OCCUPIED_INCOMPATIBLE` | Blocks placement landing on or tunneling through a turn |
+| `StartNewChainFromBlock()` | `if (cell.is_turn) return false` | Blocks chain creation at a turn |
+| `AddGhostGeom()` (render) | `if (cell.is_turn) return` (no ghost drawn) | Ghost silently disappears at turn barrier |
+| `MouseMoveCallback()` NEW_CHAIN_PICK hover | `if (is_turn) { block_hovered = false; }` | Turn block never highlighted as a selectable target |
+
+**IPC:** `start_chain_at` on a turn block returns `{"ok": false, "error": "StartNewChainFromBlock failed"}`.
+`place_block` that would land on or tunnel through a turn returns `{"ok": false, "result": "TARGET_OCCUPIED_INCOMPATIBLE"}`.
+`get_state["ghost"]` is `null` when the path forward is blocked by a turn block.
+
+### 21.7 Ray-Pick Camera Consistency Invariant
+
+**Requirement:** `RayPickBlock()` must use the **exact same** azimuth-elevation-to-Cartesian
+formula as `UpdateBuildCamera()`. The two functions independently construct the camera eye
+position from `mjvCamera`; any deviation causes the pick ray to miss the rendered block.
+
+**Correct formula** (azimuth measured from +X toward +Y, elevation from XY plane):
+```
+eye = lookat - dist · (cos(el)·cos(az),  cos(el)·sin(az),  sin(el))
+                        ↑ X: cos(az)        ↑ Y: sin(az)     ↑ Z: minus
+```
+
+**Common mistake:** Using `sin(az)` for X and `cos(az)` for Y swaps X and Y, causing picks
+to behave as if the model is rotated 90°. Negating the Z term places the camera on the
+opposite side of the lookat point vertically, causing vertical mirroring.
+Both errors together produce the "shifted and mirrored" selection behavior.

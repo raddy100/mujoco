@@ -301,15 +301,18 @@ bool RayPickBlock(const AppState& app, double mouse_x, double mouse_y,
     // Reconstruct camera ray from mjvCamera (free camera mode)
     const mjvCamera& cam = app.cam;
 
-    // Camera spherical → cartesian
-    double az  = cam.azimuth  * mjPI / 180.0;
+    // Camera spherical → cartesian — MUST match UpdateBuildCamera exactly
+    double az  = cam.azimuth   * mjPI / 180.0;
     double el  = cam.elevation * mjPI / 180.0;
     double dist = cam.distance;
+    double ca = std::cos(az), sa = std::sin(az);
+    double ce = std::cos(el), se = std::sin(el);
 
-    // Camera position
-    double cx = cam.lookat[0] - dist * std::cos(el) * std::sin(az);
-    double cy = cam.lookat[1] - dist * std::cos(el) * std::cos(az);
-    double cz = cam.lookat[2] + dist * std::sin(el);
+    // Camera position: eye = lookat - dist * forward
+    // forward = (ce*ca, ce*sa, se)  (az measured from +X toward +Y)
+    double cx = cam.lookat[0] - dist * ce * ca;
+    double cy = cam.lookat[1] - dist * ce * sa;
+    double cz = cam.lookat[2] - dist * se;
 
     // Camera axes
     // Forward = lookat - eye (normalized)
