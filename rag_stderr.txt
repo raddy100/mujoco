@@ -1,0 +1,26 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+2026-04-02T09:44:39  WARNING   huggingface_hub.utils._http  Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]
+Loading weights: 100%|##########| 103/103 [00:00<00:00, 10290.20it/s]
+BertModel LOAD REPORT from: sentence-transformers/all-MiniLM-L6-v2
+Key                     | Status     |  | 
+------------------------+------------+--+-
+embeddings.position_ids | UNEXPECTED |  | 
+
+Notes:
+- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+Embedder available: True
+Raw retrieve: 10
+After expand: 11
+RESULT 0: inclusion_reason=vector, combined=0.507944, fts=None, vec=0.9687221050262451
+RESULT 1: inclusion_reason=vector, combined=0.504087, fts=None, vec=0.9837830662727356
+RESULT 2: inclusion_reason=vector, combined=0.502692, fts=None, vec=0.9892886281013489
+RESULT 3: inclusion_reason=vector, combined=0.501534, fts=None, vec=0.9938808679580688
+RESULT 4: inclusion_reason=vector, combined=0.499381, fts=None, vec=1.0024783611297607
+RESULT 5: inclusion_reason=vector, combined=0.498266, fts=None, vec=1.0069611072540283
+RESULT 6: inclusion_reason=vector, combined=0.495206, fts=None, vec=1.0193630456924438
+RESULT 7: inclusion_reason=vector, combined=0.492631, fts=None, vec=1.0299180746078491
+RESULT 8: inclusion_reason=vector, combined=0.491322, fts=None, vec=1.0353264808654785
+RESULT 9: inclusion_reason=vector, combined=0.491071, fts=None, vec=1.0363649129867554
+RESULT 10: inclusion_reason=neighbor:declared_in, combined=0.000000, fts=None, vec=None
