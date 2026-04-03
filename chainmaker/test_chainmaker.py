@@ -199,13 +199,13 @@ with launch_chainmaker(exe_path=DEFAULT_EXE, wait=3.0) as c:
     section("7. Multi-chain workflow")
     # ------------------------------------------------------------------
 
-    # Ensure we have at least one block at (0,0,0)
+    # Ensure we have at least one block at (0,0,40)
     c.reset()
     # Place a few blocks so we have a junction candidate
     for _ in range(3):
         c.place_block()
 
-    r = c.start_chain_at(0, 0, 0)
+    r = c.start_chain_at(0, 0, 40)
     ok("start_chain_at origin succeeds", r.get("ok") is True, str(r))
 
     state = c.get_state()
@@ -280,7 +280,7 @@ with launch_chainmaker(exe_path=DEFAULT_EXE, wait=3.0) as c:
     for _ in range(3):
         c.place_block()                  # chain 0: (0,0,0) → (1,0,0) → (2,0,0) → (3,0,0)
 
-    r = c.start_chain_at(0, 0, 0)       # chain 1 junction at origin
+    r = c.start_chain_at(0, 0, 40)       # chain 1 junction at origin
     ok("9a: start_chain_at succeeds", r.get("ok") is True, str(r))
     c.set_direction("POS_Y")
     c.place_block()                      # chain 1: (0,0,0) → (0,1,0)
@@ -466,7 +466,7 @@ with launch_chainmaker(exe_path=DEFAULT_EXE, wait=3.0) as c:
     for _ in range(3):
         c.place_block()  # chain 0: (0,0,0)→(1,0,0)→(2,0,0)→(3,0,0)
 
-    r = c.start_chain_at(1, 0, 0)  # chain 1 starts at junction (1,0,0)
+    r = c.start_chain_at(1, 0, 40)  # chain 1 starts at junction (1,0,40)
     ok("9g: start_chain_at(1,0,0) ok", r.get("ok") is True, str(r))
 
     c.place_block()          # (1,1,0)
@@ -521,11 +521,11 @@ with launch_chainmaker(exe_path=DEFAULT_EXE, wait=3.0) as c:
     state = c.get_state()
     head  = state.get("head", {})
     ghost = state.get("ghost", {})
-    ok("head is at (0,1,0)", head == {"x": 0, "y": 1, "z": 0},
+    ok("head is at (0,1,40)", head == {"x": 0, "y": 1, "z": 40},
        f"head={head}")
-    # Ghost should skip (0,0,0) and appear at (0,-1,0)
-    ok("ghost skips occupied cell to (0,-1,0)",
-       ghost == {"x": 0, "y": -1, "z": 0},
+    # Ghost should skip (0,0,40) and appear at (0,-1,40)
+    ok("ghost skips occupied cell to (0,-1,40)",
+       ghost == {"x": 0, "y": -1, "z": 40},
        f"ghost={ghost}")
 
     ss(c, "09a_ghost_before_intersection")
@@ -539,8 +539,8 @@ with launch_chainmaker(exe_path=DEFAULT_EXE, wait=3.0) as c:
        f"nblocks={state.get('nblocks')}")
     # Head is now beyond the junction at (0,-1,0)
     head_after = state.get("head", {})
-    ok("head advanced past junction to (0,-1,0)",
-       head_after == {"x": 0, "y": -1, "z": 0},
+    ok("head advanced past junction to (0,-1,40)",
+       head_after == {"x": 0, "y": -1, "z": 40},
        f"head={head_after}")
 
     ss(c, "09b_after_intersection_placed")
@@ -556,8 +556,8 @@ with launch_chainmaker(exe_path=DEFAULT_EXE, wait=3.0) as c:
        state.get("nblocks") == 8,
        f"nblocks={state.get('nblocks')}")
 
-    # The grid must still contain (0,0,0) — the original first block
-    r_nc = c.start_chain_at(0, 0, 0)
+    # The grid must still contain (0,0,40) — the original first block
+    r_nc = c.start_chain_at(0, 0, 40)
     ok("origin block still exists after delete (no gap)",
        r_nc.get("ok") is True, str(r_nc))
 
@@ -668,7 +668,7 @@ with launch_chainmaker(exe_path=DEFAULT_EXE, wait=3.0) as c:
     c.place_block()   # → (1,2,0)
 
     # Start chain 1 at (1,1,0), go -Y
-    r = c.start_chain_at(1, 1, 0)
+    r = c.start_chain_at(1, 1, 40)
     ok("9h: start_chain_at(1,1,0) ok", r.get("ok") is True, str(r))
     c.set_direction("-Y")
     # PlaceBlock should pass through (1,0,0) [already on chain 0 X-axis] and land at (1,-1,0)
@@ -695,8 +695,8 @@ with launch_chainmaker(exe_path=DEFAULT_EXE, wait=3.0) as c:
        nblocks_before - nblocks_after == 2,
        f"before={nblocks_before}, after={nblocks_after}")
     head_after = state_after.get("head")
-    ok("9i: head returned to chain-1 start (1,1,0) after atomic undo",
-       head_after == {"x": 1, "y": 1, "z": 0},
+    ok("9i: head returned to chain-1 start (1,1,40) after atomic undo",
+       head_after == {"x": 1, "y": 1, "z": 40},
        f"head={head_after}")
 
     # ------------------------------------------------------------------
@@ -757,15 +757,15 @@ with launch_chainmaker(exe_path=DEFAULT_EXE, wait=3.0) as c:
        f"nblocks={state.get('nblocks')}")
 
     # A) start_chain_at on the turn block (1,0,0) must be rejected
-    r = c.start_chain_at(1, 0, 0)
+    r = c.start_chain_at(1, 0, 40)
     ok("9k-A: start_chain_at on turn block returns error",
        r.get("ok") is False,
        f"response={r}")
 
     # B) Chain 1 at (0,0,0), move +X → would hit the turn block at (1,0,0)
     #    PlaceBlock must return TARGET_OCCUPIED_INCOMPATIBLE, not SUCCESS
-    r = c.start_chain_at(0, 0, 0)
-    ok("9k-B: start chain 1 at (0,0,0) ok", r.get("ok") is True, str(r))
+    r = c.start_chain_at(0, 0, 40)
+    ok("9k-B: start chain 1 at (0,0,40) ok", r.get("ok") is True, str(r))
     c.set_direction("+X")
     r = c.place_block()
     ok("9k-B: place toward turn block is blocked",
@@ -785,7 +785,7 @@ with launch_chainmaker(exe_path=DEFAULT_EXE, wait=3.0) as c:
        f"ghost={ghost}, head={state.get('head')}")
 
     # D) start_chain_at on non-turn block adjacent to turn block is still fine
-    r = c.start_chain_at(1, 2, 0)   # (1,2,0) is a straight block, not a turn
+    r = c.start_chain_at(1, 2, 40)   # (1,2,40) is a straight block, not a turn
     ok("9k-D: start_chain_at on straight block next to turn succeeds",
        r.get("ok") is True, str(r))
 
@@ -815,26 +815,26 @@ with launch_chainmaker(exe_path=DEFAULT_EXE, wait=3.0) as c:
     ok("9l: chain 0 has 6 blocks", state.get("nblocks") == 6,
        f"nblocks={state.get('nblocks')}")
 
-    # Chain 1 from (1,0,0)
-    r = c.start_chain_at(1, 0, 0)
-    ok("9l: chain 1 at (1,0,0) ok", r.get("ok") is True, str(r))
+    # Chain 1 from (1,0,40)
+    r = c.start_chain_at(1, 0, 40)
+    ok("9l: chain 1 at (1,0,40) ok", r.get("ok") is True, str(r))
     c.set_direction("+Y")
-    c.place_block()   # (1,1,0)
-    c.place_block()   # (1,2,0)
+    c.place_block()   # (1,1,40)
+    c.place_block()   # (1,2,40)
 
-    # Chain 2 from (3,0,0)
-    r = c.start_chain_at(3, 0, 0)
-    ok("9l: chain 2 at (3,0,0) ok", r.get("ok") is True, str(r))
+    # Chain 2 from (3,0,40)
+    r = c.start_chain_at(3, 0, 40)
+    ok("9l: chain 2 at (3,0,40) ok", r.get("ok") is True, str(r))
     c.set_direction("+Y")
-    c.place_block()   # (3,1,0)
-    c.place_block()   # (3,2,0)
+    c.place_block()   # (3,1,40)
+    c.place_block()   # (3,2,40)
 
-    # Chain 3 from (5,0,0)
-    r = c.start_chain_at(5, 0, 0)
-    ok("9l: chain 3 at (5,0,0) ok", r.get("ok") is True, str(r))
+    # Chain 3 from (5,0,40)
+    r = c.start_chain_at(5, 0, 40)
+    ok("9l: chain 3 at (5,0,40) ok", r.get("ok") is True, str(r))
     c.set_direction("+Y")
-    c.place_block()   # (5,1,0)
-    c.place_block()   # (5,2,0)
+    c.place_block()   # (5,1,40)
+    c.place_block()   # (5,2,40)
 
     state = c.get_state()
     ok("9l: 4 chains exist", state.get("nchains") == 4,
@@ -849,8 +849,8 @@ with launch_chainmaker(exe_path=DEFAULT_EXE, wait=3.0) as c:
     # Verify no turn block was used as a junction (all 3 start points are straight)
     # Re-verify we cannot start yet another chain on one of chain 1's turn blocks —
     # chain 1 has no turn blocks here (all straight), so this is a sanity check.
-    r_bad = c.start_chain_at(1, 0, 0)   # valid junction: straight block
-    ok("9l: re-using straight junction (1,0,0) for 5th chain is allowed",
+    r_bad = c.start_chain_at(1, 0, 40)   # valid junction: straight block
+    ok("9l: re-using straight junction (1,0,40) for 5th chain is allowed",
        r_bad.get("ok") is True, str(r_bad))
     state = c.get_state()
     ok("9l: 5 chains after re-use of junction", state.get("nchains") == 5,
@@ -869,6 +869,180 @@ with launch_chainmaker(exe_path=DEFAULT_EXE, wait=3.0) as c:
     time.sleep(0.2)
     ss(c, "09l_four_chains_simulate")
     c.exit_simulate()
+
+    # ------------------------------------------------------------------
+    section("9m. Straight-run weld levels")
+    # ------------------------------------------------------------------
+
+    # Build a fresh 5-block straight chain (no turns) → 4 eligible pairs for WELD_FULL
+    r = c.reset()
+    ok("9m-setup: reset ok", r.get("ok") is True, str(r))
+    c.set_direction("+X")
+    for _ in range(4):
+        c.place_block()
+
+    # --- Weld level defaults to 0 (Off) ---
+    state = c.get_state()
+    ok("9m: weld_level defaults to 0", state.get("weld_level") == 0,
+       f"got {state.get('weld_level')}")
+
+    # Enter simulation with WELD_NONE → baseline neq
+    r = c.enter_simulate()
+    ok("9m: enter simulation ok (weld=0)", r.get("ok") is True, str(r))
+    perf = c.get_profiler()
+    neq_none = perf.get("neq", -1)
+    nv_none  = perf.get("nv",  -1)
+    ok("9m: neq reported with weld=0", neq_none >= 0, f"neq={neq_none}")
+    ok("9m: nv reported with weld=0",  nv_none  > 0,  f"nv={nv_none}")
+    c.exit_simulate()
+
+    # --- Switch to WELD_FULL ---
+    r = c.send({"cmd": "set_weld_level", "level": 2})
+    ok("9m: set_weld_level=2 ok", r.get("ok") is True, str(r))
+    state = c.get_state()
+    ok("9m: weld_level now 2", state.get("weld_level") == 2,
+       f"got {state.get('weld_level')}")
+
+    # Enter simulation with WELD_FULL:
+    # - Ball joints are REMOVED for straight-run pairs → nv decreases
+    # - No equality constraints added for straight runs → neq unchanged
+    # (Only self-intersection welds contribute to neq, same as WELD_NONE)
+    r = c.enter_simulate()
+    ok("9m: enter simulation ok (weld=2)", r.get("ok") is True, str(r))
+    perf = c.get_profiler()
+    neq_full = perf.get("neq", -1)
+    nv_full  = perf.get("nv",  -1)
+    ok("9m: neq unchanged with WELD_FULL (joints removed, not constrained)",
+       neq_full == neq_none,
+       f"neq_none={neq_none} neq_full={neq_full}")
+    ok("9m: nv_full < nv_none (ball joints removed, fewer DOF)",
+       nv_full < nv_none,
+       f"nv_none={nv_none} nv_full={nv_full}")
+    c.exit_simulate()
+
+    # --- Chain with a turn: fewer joints removed than all-straight ---
+    # A 5-block chain with 1 turn: pairs (bi-1, bi) involving a turn keep their
+    # ball joints.  Only the pairs with both non-turn blocks lose their joints.
+    r = c.reset()
+    ok("9m-turn: reset ok", r.get("ok") is True, str(r))
+    c.set_direction("+X")
+    c.place_block()
+    c.place_block()
+    # place a turn block: change direction then place
+    c.set_direction("+Y")  # turn corner
+    c.place_block()        # turn block
+    c.place_block()
+    c.place_block()
+    r = c.send({"cmd": "set_weld_level", "level": 2})
+    ok("9m-turn: set_weld_level=2 ok", r.get("ok") is True, str(r))
+    r = c.enter_simulate()
+    ok("9m-turn: enter simulation ok", r.get("ok") is True, str(r))
+    perf_turn = c.get_profiler()
+    nv_turn = perf_turn.get("nv", -1)
+    # Turn chain has fewer joints removed -> nv_turn > nv_full (all-straight chain)
+    ok("9m-turn: nv_turn > nv_full (turn blocks preserve ball joints)",
+       nv_turn > nv_full,
+       f"nv_turn={nv_turn} nv_full={nv_full}")
+    c.exit_simulate()
+
+    # --- Toggle OFF → no more welds ---
+    r = c.send({"cmd": "set_weld_level", "level": 0})
+    ok("9m: set_weld_level=0 ok", r.get("ok") is True, str(r))
+    state = c.get_state()
+    ok("9m: weld_level back to 0", state.get("weld_level") == 0,
+       f"got {state.get('weld_level')}")
+
+    # --- Save/load round-trip ---
+    import tempfile, os as _os
+    tmp = tempfile.mktemp(suffix=".json")
+    r = c.send({"cmd": "set_weld_level", "level": 2})
+    ok("9m-io: set level=2 before save", r.get("ok") is True, str(r))
+    r = c.save(tmp)
+    ok("9m-io: save ok", r.get("ok") is True, str(r))
+    r = c.send({"cmd": "set_weld_level", "level": 0})  # reset in-memory
+    state_before = c.get_state()
+    ok("9m-io: weld_level reset to 0 before load", state_before.get("weld_level") == 0)
+    r = c.load(tmp)
+    ok("9m-io: load ok", r.get("ok") is True, str(r))
+    state_after = c.get_state()
+    ok("9m-io: weld_level=2 restored after load",
+       state_after.get("weld_level") == 2,
+       f"got {state_after.get('weld_level')}")
+    try: _os.unlink(tmp)
+    except: pass
+
+    ss(c, "09m_weld_levels")
+
+    # ------------------------------------------------------------------
+    section("9n. Root fixed / free toggle")
+    # ------------------------------------------------------------------
+
+    r = c.reset()
+    ok("9n-setup: reset ok", r.get("ok") is True, str(r))
+
+    # --- Default state: root_fixed = true ---
+    state = c.get_state()
+    ok("9n: root_fixed defaults to true", state.get("root_fixed") is True,
+       f"got {state.get('root_fixed')}")
+
+    # Build a small chain and enter simulation: root fixed → no free joint → fewer nv
+    c.set_direction("+X")
+    for _ in range(3):
+        c.place_block()
+    r = c.enter_simulate()
+    ok("9n: enter sim (root_fixed=true) ok", r.get("ok") is True, str(r))
+    perf_fixed = c.get_profiler()
+    nv_fixed = perf_fixed.get("nv", -1)
+    ok("9n: nv reported with root_fixed=true", nv_fixed >= 0, f"nv={nv_fixed}")
+    c.exit_simulate()
+
+    # --- Toggle to root_free ---
+    r = c.send({"cmd": "set_root_fixed", "fixed": False})
+    ok("9n: set_root_fixed=false ok", r.get("ok") is True, str(r))
+    state = c.get_state()
+    ok("9n: root_fixed now false", state.get("root_fixed") is False,
+       f"got {state.get('root_fixed')}")
+
+    r = c.enter_simulate()
+    ok("9n: enter sim (root_fixed=false) ok", r.get("ok") is True, str(r))
+    perf_free = c.get_profiler()
+    nv_free = perf_free.get("nv", -1)
+    ok("9n: nv_free > nv_fixed (free joint adds 6 DOF)",
+       nv_free > nv_fixed,
+       f"nv_fixed={nv_fixed} nv_free={nv_free}")
+    ok("9n: nv_free == nv_fixed + 6 (one free joint = 6 DOF)",
+       nv_free == nv_fixed + 6,
+       f"nv_fixed={nv_fixed} nv_free={nv_free}")
+    c.exit_simulate()
+
+    # --- Toggle back to fixed ---
+    r = c.send({"cmd": "set_root_fixed", "fixed": True})
+    ok("9n: set_root_fixed=true ok", r.get("ok") is True, str(r))
+    state = c.get_state()
+    ok("9n: root_fixed restored to true", state.get("root_fixed") is True,
+       f"got {state.get('root_fixed')}")
+
+    # --- Save/load round-trip for root_fixed ---
+    import tempfile as _tmpfile, os as _os2
+    tmp2 = _tmpfile.mktemp(suffix=".json")
+    r = c.send({"cmd": "set_root_fixed", "fixed": False})
+    ok("9n-io: set root_fixed=false before save", r.get("ok") is True, str(r))
+    r = c.save(tmp2)
+    ok("9n-io: save ok", r.get("ok") is True, str(r))
+    r = c.send({"cmd": "set_root_fixed", "fixed": True})  # reset in-memory
+    state_before = c.get_state()
+    ok("9n-io: root_fixed reset to true before load",
+       state_before.get("root_fixed") is True)
+    r = c.load(tmp2)
+    ok("9n-io: load ok", r.get("ok") is True, str(r))
+    state_after = c.get_state()
+    ok("9n-io: root_fixed=false restored after load",
+       state_after.get("root_fixed") is False,
+       f"got {state_after.get('root_fixed')}")
+    try: _os2.unlink(tmp2)
+    except: pass
+
+    ss(c, "09n_root_fixed")
 
     # ------------------------------------------------------------------
     section("11. Screenshot")

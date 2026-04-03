@@ -3431,3 +3431,110 @@ eye = lookat - dist · (cos(el)·cos(az),  cos(el)·sin(az),  sin(el))
 to behave as if the model is rotated 90°. Negating the Z term places the camera on the
 opposite side of the lookat point vertically, causing vertical mirroring.
 Both errors together produce the "shifted and mirrored" selection behavior.
+
+---
+
+## 22. Straight-Run Weld Constraints
+
+### 22.1 Overview
+
+Straight-run welds reduce the solver workload for long uninterrupted chains.
+By adding `mjEQ_WELD` equality constraints between consecutive non-turn blocks,
+the string tension between them is treated as infinite, locking their 6 relative DOF.
+The solver sees the straight run as a rigid rod rather than a sequence of free-floating
+ball joints, which improves stability and convergence speed.
+
+### 22.2 Physical Justification
+
+In the real robot, string tension along a straight run prevents the beads from
+rotating or translating relative to each other.  Turn blocks are pivot points:
+the string changes direction there, so relative rotation between a straight block
+and a turn block is still free.  Thus:
+
+- **Weld eligible:** consecutive pair where **neither** block is a turn block
+- **Weld NOT eligible:** any pair that includes a turn block
+
+### 22.3 WeldLevel Enum
+
+| Value | Name | Description |
+|-------|------|-------------|
+| `0` | `WELD_NONE` | No straight-run welds (default). Maximum DOF, maximum accuracy. |
+| `2` | `WELD_FULL` | Weld every eligible consecutive pair. Minimum effective DOF, fastest simulation. |
+
+`WELD_PARTIAL` (level 1) is reserved for future implementation (e.g. weld only runs of ≥ N blocks).
+
+### 22.4 DOF Impact
+
+WELD_FULL **removes ball joints** from the model rather than adding equality constraints.
+This directly reduces `nv` (the model's joint velocity DOF count) without adding any
+equality constraint overhead.
+
+Why joint removal is strictly better than weld constraints:
+- `mjEQ_WELD` keeps the ball joint (adding 3 DOF) then fights it with a constraint — net cost is higher
+- Removing the joint eliminates DOF entirely — the solver operates on a smaller system from the start
+- No solver "fighting" between a ball joint and a weld trying to zero it out
+
+Typical DOF numbers for a 5-block chain:
+
+| Config | Free joint | Ball joints | `nv` |
+|--------|-----------|-------------|------|
+| 5 straight, WELD_NONE | 6 | 4 × 3 = 12 | **18** |
+| 5 straight, WELD_FULL | 6 | 0 | **6** |
+| 5 blocks with 1 turn, WELD_FULL | 6 | 2 × 3 = 6 | **12** |
+
+For the turn chain: pairs involving the turn block keep their ball joints (2 pairs adjacent to turn = 6 DOF retained); the other 2 straight-run pairs are removed.
+
+`neq` does **not** change between WELD_NONE and WELD_FULL for straight runs — only self-intersection welds contribute to `neq`.
+
+### 22.5 Implementation
+
+**Data model (`chainmaker.h`):**
+```cpp
+enum WeldLevel { WELD_NONE = 0, WELD_FULL = 2 };
+// ChainWorld:
+WeldLevel weld_level = WELD_NONE;
+```
+
+**Compile step (`chainmaker_compile.cpp`, inside the body creation loop):**
+```cpp
+// For each block bi in the chain:
+IVec3 prev_pos   = chain.blocks[bi - 1];
+bool prev_is_turn = world.grid.at(prev_pos).is_turn;
+bool cur_is_turn  = world.grid.at(cur_pos).is_turn;
+
+// Skip ball joint when both blocks are non-turn and weld is active.
+// The body is then rigidly attached to its parent in the kinematic tree —
+// no equality constraint needed, nv is directly reduced.
+bool skip = (world.weld_level == WELD_FULL) &&
+            !is_self_intersection &&     // self-intersections always need joint
+            !prev_is_turn && !cur_is_turn;
+if (!skip) AddBallJoint(body, delta);
+```
+
+> ⚠️ **Do NOT use `mjEQ_WELD` for straight-run rigidity.** A weld constraint keeps
+> the ball joint (adding 3 DOF) and then forces it to zero — which is slower than
+> simply not adding the joint. Remove the joint; let the kinematic tree do the work.
+
+**Persistence:** `weld_level` is saved/loaded in JSON alongside `sim_preset`.
+
+**UI:** "Welds: Off" / "Welds: Full" cycling button in the right panel (below Sim Speed).
+
+**IPC commands:**
+- `get_state` → `"weld_level": 0 | 2`
+- `get_profiler` → `"neq": <int>` (equality constraint count)
+- `set_weld_level` → `{"cmd": "set_weld_level", "level": 0 | 2}` → `{"ok": true, "level": <int>}`
+
+### 22.6 Interaction with Turn Blocks
+
+Turn blocks are excluded at both endpoints.  Example 5-block chain with 1 turn at index 2:
+
+```
+B0 — B1 — T2 — B3 — B4
+        weld?         weld?
+(B0,B1): both straight → WELD ✓
+(B1,T2): T2 is turn → NO WELD
+(T2,B3): T2 is turn → NO WELD
+(B3,B4): both straight → WELD ✓
+```
+
+Result: 2 welds for a 5-block chain with 1 turn (vs 4 for a 5-block all-straight chain).

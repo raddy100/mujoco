@@ -146,6 +146,19 @@ int main(int argc, const char** argv) {
     // --- Create first chain ---
     CreateFirstChain(g_app.world);
 
+    // --- Aim camera at the first block ---
+    // The origin block lives at grid position (0,0,40); compute its world coords
+    // and centre the camera lookat there so it's visible on startup.
+    {
+        const ChainWorld& w = g_app.world;
+        double origin_world[3];
+        w.GridToWorld(w.chains[0].blocks[0], origin_world);
+        g_app.cam.lookat[0] = origin_world[0];
+        g_app.cam.lookat[1] = origin_world[1];
+        g_app.cam.lookat[2] = origin_world[2];
+        g_app.cam.distance  = 1.5;
+    }
+
     // --- Start IPC test server (only if --test flag was given) ---
     if (g_app.test_mode) {
         IpcServerStart(g_app);

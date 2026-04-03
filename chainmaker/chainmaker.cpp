@@ -21,7 +21,7 @@ void CreateFirstChain(ChainWorld& world) {
     std::memcpy(chain.color, ChainWorld::kPalette[0], sizeof(float) * 4);
     chain.head_direction = FACE_POS_X;
 
-    IVec3 origin{0, 0, 0};
+    IVec3 origin{0, 0, 40};
     chain.blocks.push_back(origin);
 
     GridCell cell;

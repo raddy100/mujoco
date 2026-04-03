@@ -289,9 +289,15 @@ CompileResult CompileWorld(const ChainWorld& world) {
 
             AddBlockGeom(root, chain);
 
-            mjsJoint* fj   = mjs_addJoint(root, nullptr);
-            fj->type       = mjJNT_FREE;
-            fj->damping[0] = kJointDamping;
+            // Chain-0 root: free joint makes the whole structure float.
+            // When root_fixed=true (default), no joint is added — the root body
+            // is welded to worldbody, anchoring the entire structure in place.
+            // When root_fixed=false, the standard free joint is used.
+            if (!world.root_fixed || ci != 0) {
+                mjsJoint* fj   = mjs_addJoint(root, nullptr);
+                fj->type       = mjJNT_FREE;
+                fj->damping[0] = kJointDamping;
+            }
 
             body_name_map[b0]     = rname;
             body_ptr_map[b0]      = root;
@@ -320,7 +326,15 @@ CompileResult CompileWorld(const ChainWorld& world) {
             root->pos[2] = delta.z * world.CellStride();
 
             AddBlockGeom(root, chain);
-            AddBallJoint(root, delta);
+            // Skip ball joint when WELD_FULL and neither block is a turn.
+            // Without a joint the body is rigidly welded to the parent in the
+            // kinematic tree — no equality constraint needed, and nv is reduced.
+            // The junction (blocks[0]) is always non-turn (§21.6 invariant).
+            {
+                bool b1_is_turn = world.grid.count(b1) && world.grid.at(b1).is_turn;
+                if (world.weld_level == WELD_NONE || b1_is_turn)
+                    AddBallJoint(root, delta);
+            }
 
             if (!body_name_map.count(b1))     body_name_map[b1]     = rname;
             if (!body_ptr_map.count(b1))      body_ptr_map[b1]      = root;
@@ -367,7 +381,19 @@ CompileResult CompileWorld(const ChainWorld& world) {
             body->pos[2] = delta.z * world.CellStride();
 
             AddBlockGeom(body, chain);
-            AddBallJoint(body, delta);
+
+            // Skip ball joint when WELD_FULL, neither block is a turn, and this is
+            // not a self-intersection.  Self-intersections always keep their ball
+            // joint so the weld loop-closure constraint has DOF to close against.
+            {
+                IVec3 prev_pos   = chain.blocks[bi - 1];
+                bool prev_is_turn = world.grid.count(prev_pos) && world.grid.at(prev_pos).is_turn;
+                bool cur_is_turn  = world.grid.count(cur_pos)  && world.grid.at(cur_pos).is_turn;
+                bool skip = (world.weld_level == WELD_FULL) &&
+                            !is_self_intersection &&
+                            !prev_is_turn && !cur_is_turn;
+                if (!skip) AddBallJoint(body, delta);
+            }
 
             // First body wins at each grid cell
             if (!body_name_map.count(cur_pos))     body_name_map[cur_pos]     = bname;

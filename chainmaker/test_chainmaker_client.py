@@ -122,6 +122,10 @@ class ChainMakerClient:
         """Place a block at the current head position in the active chain."""
         return self._send({"cmd": "place_block"})
 
+    def send(self, cmd: Dict[str, Any]) -> Dict[str, Any]:
+        """Send an arbitrary command dict (uses 'command' key convention for custom IPC)."""
+        return self._send(cmd)
+
     def delete_block(self) -> Dict:
         """Delete the most recently placed block in the active chain."""
         return self._send({"cmd": "delete_block"})

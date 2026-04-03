@@ -158,6 +158,25 @@ enum SimPreset {
 constexpr int kNumSimPresets = 3;
 
 // ---------------------------------------------------------------------------
+// WeldLevel — straight-run weld policy
+// ---------------------------------------------------------------------------
+// Weld constraints between consecutive non-turn blocks eliminate the ball-
+// joint DOF between them, treating straight runs as rigid rods.  This
+// dramatically reduces DOF (and solve time) for long straight chains while
+// remaining physically justified when string tension is high.
+//
+// Rules:
+//   - A weld is added between blocks[i] and blocks[i+1] only when NEITHER
+//     block is a turn block.
+//   - Turn blocks and their immediate neighbors are never welded.
+//   - WELD_PARTIAL reserved for future implementation.
+enum WeldLevel {
+    WELD_NONE = 0,  // No straight-run welds (current default) — maximum DOF
+    WELD_FULL = 2,  // Weld every eligible consecutive pair — minimum DOF
+};
+constexpr int kNumWeldLevels = 2;  // NONE and FULL only
+
+// ---------------------------------------------------------------------------
 // ChainWorld — central data model
 // ---------------------------------------------------------------------------
 
@@ -168,7 +187,9 @@ struct ChainWorld {
 
     double bead_size  = 0.05;   // cube edge length in metres
     double gap_ratio  = 0.05;   // gap as fraction of bead_size
-    SimPreset sim_preset = SIM_ACCURATE;  // saved/loaded with file
+    SimPreset sim_preset  = SIM_ACCURATE;  // saved/loaded with file
+    WeldLevel weld_level  = WELD_NONE;     // saved/loaded with file
+    bool      root_fixed  = true;          // chain-0 root body: fixed=no free joint (default), free=full 6-DOF
 
     double CellStride() const { return bead_size * (1.0 + gap_ratio); }
     double Gap()        const { return bead_size * gap_ratio; }

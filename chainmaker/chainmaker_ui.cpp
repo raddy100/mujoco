@@ -21,11 +21,20 @@ static const char* kBtnSimulate = "Simulate (P)";
 
 // Sim Speed button prefix — used for identification in HandleUIClick
 static const char* kBtnSimSpeedPrefix = "Sim Speed: ";
+// Welds button prefix — used for identification in HandleUIClick
+static const char* kBtnWeldPrefix = "Welds: ";
+// Root fixed/free button prefix
+static const char* kBtnRootPrefix = "Root: ";
 
 static const char* kSimSpeedLabels[kNumSimPresets] = {
     "Sim Speed: Accurate",  // 0 — Newton + box
     "Sim Speed: Balanced",  // 1 — CG + box
     "Sim Speed: Fast",      // 2 — CG + sphere
+};
+
+static const char* kWeldLabels[] = {
+    "Welds: Off",   // WELD_NONE = 0
+    "Welds: Full",  // WELD_FULL = 2 (stored at index 1)
 };
 
 // ---------------------------------------------------------------------------
@@ -102,6 +111,15 @@ void BuildUI(AppState& app) {
         addButton(kSimSpeedLabels[p]);
     }
 
+    // Weld level cycling button: Off → Full → Off → …
+    {
+        int wi = (app.world.weld_level == WELD_FULL) ? 1 : 0;
+        addButton(kWeldLabels[wi]);
+    }
+
+    // Root fixed/free cycling button
+    addButton(app.world.root_fixed ? "Root: Fixed" : "Root: Free");
+
     // Separator
     clearDef(); def[di].type = mjITEM_SEPARATOR; di++;
 
@@ -157,6 +175,22 @@ void HandleUIClick(AppState& app, mjuiItem* item, int glfw_action) {
             ApplySimPreset(app);
         }
         app.needs_ui_rebuild = true;  // button label updates on next frame
+        return;
+    }
+
+    // Welds cycling button: Off → Full → Off → …
+    if (std::strncmp(item->name, kBtnWeldPrefix,
+                     std::strlen(kBtnWeldPrefix)) == 0) {
+        app.world.weld_level = (app.world.weld_level == WELD_NONE) ? WELD_FULL : WELD_NONE;
+        app.needs_ui_rebuild = true;
+        return;
+    }
+
+    // Root Fixed/Free cycling button
+    if (std::strncmp(item->name, kBtnRootPrefix,
+                     std::strlen(kBtnRootPrefix)) == 0) {
+        app.world.root_fixed = !app.world.root_fixed;
+        app.needs_ui_rebuild = true;
         return;
     }
 

@@ -169,9 +169,11 @@ static json BuildStateJson(const AppState& app) {
     }
 
     // Camera state (always available)
-    s["azimuth"]   = app.cam.azimuth;
-    s["elevation"] = app.cam.elevation;
-    s["distance"]  = app.cam.distance;
+    s["azimuth"]    = app.cam.azimuth;
+    s["elevation"]  = app.cam.elevation;
+    s["distance"]   = app.cam.distance;
+    s["weld_level"] = static_cast<int>(app.world.weld_level);
+    s["root_fixed"] = app.world.root_fixed;
 
     return s;
 }
@@ -389,6 +391,7 @@ static json ExecuteCommand(const json& cmd, AppState& app, mjrRect viewport) {
         resp["kinematics_ms"]= timer_ms(mjTIMER_POS_KINEMATICS);
         resp["inertia_ms"]  = timer_ms(mjTIMER_POS_INERTIA);
         resp["ncon"]        = d->ncon;
+        resp["neq"]         = (long long)m->neq;
         resp["nbody"]       = (long long)m->nbody;
         resp["nv"]          = (long long)m->nv;
         resp["iterations"]  = m->opt.iterations;
@@ -398,6 +401,7 @@ static json ExecuteCommand(const json& cmd, AppState& app, mjrRect viewport) {
             resp["sim_preset"]       = p;
             resp["sim_preset_label"] = (p >= 0 && p < kNumSimPresets) ? labels[p] : "Unknown";
         }
+        resp["weld_level"] = static_cast<int>(app.world.weld_level);
         return resp;
     }
 
@@ -419,6 +423,38 @@ static json ExecuteCommand(const json& cmd, AppState& app, mjrRect viewport) {
         }
         resp["ok"]     = true;
         resp["preset"] = p;
+        return resp;
+    }
+
+    // ---- set_root_fixed -----------------------------------------------------
+    // Toggles whether chain-0's root body has a free joint (root_fixed=false)
+    // or is anchored to worldbody (root_fixed=true, default).
+    // Takes effect on next Enter Simulation.
+    if (command == "set_root_fixed") {
+        bool fixed = true;
+        try { fixed = cmd.at("fixed").get<bool>(); }
+        catch (...) { resp["error"] = "missing 'fixed' field (bool)"; return resp; }
+        app.world.root_fixed = fixed;
+        resp["ok"]    = true;
+        resp["fixed"] = fixed;
+        return resp;
+    }
+
+    // ---- set_weld_level -----------------------------------------------------
+    // Sets the straight-run weld policy (0=None, 2=Full).
+    // Takes effect on next CompileWorld call (i.e. next Enter Simulation).
+    if (command == "set_weld_level") {
+        int lv = -1;
+        try { lv = cmd.at("level").get<int>(); }
+        catch (...) { resp["error"] = "missing 'level' field (int 0 or 2)"; return resp; }
+        if (lv != 0 && lv != 2) {
+            resp["ok"]    = false;
+            resp["error"] = "level must be 0 (None) or 2 (Full)";
+            return resp;
+        }
+        app.world.weld_level = static_cast<WeldLevel>(lv);
+        resp["ok"]    = true;
+        resp["level"] = lv;
         return resp;
     }
 
