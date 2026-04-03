@@ -146,6 +146,18 @@ enum class AppMode {
 };
 
 // ---------------------------------------------------------------------------
+// SimPreset — simulation speed / accuracy trade-off selector
+// ---------------------------------------------------------------------------
+
+enum SimPreset {
+    SIM_ACCURATE = 0,  // Newton + box collision: slowest, most accurate
+    SIM_BALANCED = 1,  // CG    + box collision: ~5x faster, same geometry
+    SIM_FAST     = 2,  // CG    + sphere:        ~11x faster, inscribed sphere
+};
+
+constexpr int kNumSimPresets = 3;
+
+// ---------------------------------------------------------------------------
 // ChainWorld — central data model
 // ---------------------------------------------------------------------------
 
@@ -156,6 +168,7 @@ struct ChainWorld {
 
     double bead_size  = 0.05;   // cube edge length in metres
     double gap_ratio  = 0.05;   // gap as fraction of bead_size
+    SimPreset sim_preset = SIM_ACCURATE;  // saved/loaded with file
 
     double CellStride() const { return bead_size * (1.0 + gap_ratio); }
     double Gap()        const { return bead_size * gap_ratio; }
@@ -250,6 +263,9 @@ struct AppState {
     // Status / overlay text
     char status_text[512] = "";
 
+    // Request UI rebuild on next frame (e.g. after Sim Speed button cycles preset)
+    bool needs_ui_rebuild = false;
+
     // File I/O capture
     char io_filename[256] = "";
     int  io_mode          = 0;   // 0=none, 1=save, 2=load
@@ -267,8 +283,8 @@ struct AppState {
 // ---------------------------------------------------------------------------
 
 constexpr double kJointDamping       = 0.15;
-constexpr double kSolref[2]          = {0.15, 0.7};
-constexpr double kSolimp[5]          = {0.9, 0.95, 0.001, 0.5, 2.0};
+constexpr double kSolref[2]          = {0.005, 2.0};   // near-rigid, overdamped (no bounce)
+constexpr double kSolimp[5]          = {0.95, 0.999, 0.001, 0.5, 2.0};  // near-impenetrable wall
 constexpr double kGeomMargin         = 0.0;
 constexpr double kDefaultBeadSize    = 0.05;   // 5 cm
 constexpr double kDefaultGapRatio    = 0.05;

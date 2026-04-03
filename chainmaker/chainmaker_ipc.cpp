@@ -384,6 +384,33 @@ static json ExecuteCommand(const json& cmd, AppState& app, mjrRect viewport) {
         resp["nbody"]       = (long long)m->nbody;
         resp["nv"]          = (long long)m->nv;
         resp["iterations"]  = m->opt.iterations;
+        {
+            int p = static_cast<int>(app.world.sim_preset);
+            const char* labels[kNumSimPresets] = {"Accurate", "Balanced", "Fast"};
+            resp["sim_preset"]       = p;
+            resp["sim_preset_label"] = (p >= 0 && p < kNumSimPresets) ? labels[p] : "Unknown";
+        }
+        return resp;
+    }
+
+    // ---- set_sim_preset -----------------------------------------------------
+    // Sets the simulation speed/accuracy preset (0=Accurate, 1=Balanced, 2=Fast).
+    // If simulation is running, applies the preset immediately to the live model.
+    if (command == "set_sim_preset") {
+        int p = -1;
+        try { p = cmd.at("preset").get<int>(); }
+        catch (...) { resp["error"] = "missing 'preset' field (int 0-2)"; return resp; }
+        if (p < 0 || p >= kNumSimPresets) {
+            resp["ok"]    = false;
+            resp["error"] = "preset must be 0 (Accurate), 1 (Balanced), or 2 (Fast)";
+            return resp;
+        }
+        app.world.sim_preset = static_cast<SimPreset>(p);
+        if (app.mode == AppMode::SIMULATE) {
+            ApplySimPreset(app);
+        }
+        resp["ok"]     = true;
+        resp["preset"] = p;
         return resp;
     }
 

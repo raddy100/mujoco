@@ -17,6 +17,7 @@ bool SaveWorldToJSON(const ChainWorld& world, const char* filename) {
     j["version"]   = 1;
     j["bead_size"] = world.bead_size;
     j["gap_ratio"] = world.gap_ratio;
+    j["sim_preset"] = static_cast<int>(world.sim_preset);
 
     json chains_arr = json::array();
     for (const auto& chain : world.chains) {
@@ -83,8 +84,9 @@ bool LoadWorldFromJSON(ChainWorld& world, const char* filename) {
     world.chains.clear();
     world.active_chain_id = -1;
 
-    world.bead_size = j.value("bead_size", 0.05);
-    world.gap_ratio = j.value("gap_ratio", 0.05);
+    world.bead_size  = j.value("bead_size", 0.05);
+    world.gap_ratio  = j.value("gap_ratio", 0.05);
+    world.sim_preset = static_cast<SimPreset>(j.value("sim_preset", 0));
 
     for (const auto& cj : j["chains"]) {
         Chain chain;

@@ -303,9 +303,9 @@ with launch_chainmaker(exe_path=DEFAULT_EXE, wait=3.0) as c:
     ok("9a: exit_simulate ok", r.get("ok") is True)
 
     # ------------------------------------------------------------------
-    section("9d. Profiler - solver optimizations active")
+    section("9d. Profiler - default preset is Accurate (Newton, iterations=50)")
     # ------------------------------------------------------------------
-    # Build a 6-block chain and verify profiler reports optimised settings
+    # Build a 6-block chain and verify profiler reports Accurate preset defaults
     c.reset()
     for _ in range(5):
         c.place_block()
@@ -315,8 +315,10 @@ with launch_chainmaker(exe_path=DEFAULT_EXE, wait=3.0) as c:
 
     r = c.get_profiler()
     ok("9d: get_profiler ok in sim mode", r.get("ok") is True, str(r))
-    ok("9d: iterations = 15 (CG optimised)", r.get("iterations") == 15,
+    ok("9d: default preset = Accurate (iterations=50)", r.get("iterations") == 50,
        f"iterations={r.get('iterations')}")
+    ok("9d: sim_preset_label = Accurate", r.get("sim_preset_label") == "Accurate",
+       f"sim_preset_label={r.get('sim_preset_label')}")
     ok("9d: step_ms reported (timer working)",
        isinstance(r.get("step_ms"), (int, float)),
        f"step_ms={r.get('step_ms')}")
@@ -327,6 +329,47 @@ with launch_chainmaker(exe_path=DEFAULT_EXE, wait=3.0) as c:
     r3 = c.get_profiler()
     ok("9d: get_profiler outside sim returns error",
        r3.get("ok") is False, str(r3))
+
+    ss(c, "09d_profiler")
+
+    # ------------------------------------------------------------------
+    section("9d2. Sim preset switching -- Accurate -> Balanced -> Fast -> Accurate")
+    # ------------------------------------------------------------------
+    c.reset()
+    for _ in range(5):
+        c.place_block()
+
+    # Set preset to Balanced before entering sim
+    c.set_sim_preset(1)  # 1 = Balanced
+    c.enter_simulate()
+    time.sleep(0.3)
+
+    r = c.get_profiler()
+    ok("9d2: Balanced preset iterations=25", r.get("iterations") == 25,
+       f"iterations={r.get('iterations')}")
+    ok("9d2: Balanced preset label", r.get("sim_preset_label") == "Balanced",
+       f"label={r.get('sim_preset_label')}")
+
+    # Switch to Fast live (mid-simulation)
+    c.set_sim_preset(2)  # 2 = Fast
+    time.sleep(0.1)
+    r = c.get_profiler()
+    ok("9d2: Fast preset iterations=20 (live switch)", r.get("iterations") == 20,
+       f"iterations={r.get('iterations')}")
+    ok("9d2: Fast preset label", r.get("sim_preset_label") == "Fast",
+       f"label={r.get('sim_preset_label')}")
+
+    # Switch back to Accurate live
+    c.set_sim_preset(0)  # 0 = Accurate
+    time.sleep(0.1)
+    r = c.get_profiler()
+    ok("9d2: Accurate preset iterations=50 (live switch back)", r.get("iterations") == 50,
+       f"iterations={r.get('iterations')}")
+    ok("9d2: Accurate preset label", r.get("sim_preset_label") == "Accurate",
+       f"label={r.get('sim_preset_label')}")
+
+    c.exit_simulate()
+    ss(c, "09d2_preset_switch")
 
     ss(c, "09d_profiler")
 

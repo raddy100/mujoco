@@ -2,6 +2,11 @@
 
 #include "chainmaker.h"
 
+// Apply the current world.sim_preset to the live mjModel* (no-op if not in sim).
+// Patches opt.solver/timestep/iterations and toggles contype/conaffinity on
+// box vs sphere geoms.  Safe to call mid-simulation: takes effect next mj_step.
+void ApplySimPreset(AppState& app);
+
 // Enter the simulation stage: compile world → mjModel, start physics.
 void EnterSimulation(AppState& app);
 

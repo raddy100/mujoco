@@ -3136,7 +3136,87 @@ Windows uses `_popen`/`_pclose`; POSIX uses `popen`/`pclose`. The file
 
 ---
 
-## 19. Scope Status
+## 19. Simulation Speed Presets
+
+### 19.1 Overview
+
+The **Sim Speed** cycling button (right-side UI panel, build and simulate modes) lets the
+user switch between three physics-accuracy/performance presets. Clicking cycles forward:
+**Accurate → Balanced → Fast → Accurate …**
+
+| Preset | Solver | Timestep | Iterations | Contact geom |
+|--------|--------|----------|------------|--------------|
+| Accurate | Newton | 0.002 s | 20 | Box corners (4 per block) |
+| Balanced | CG | 0.005 s | 15 | Box corners (4 per block) |
+| Fast | CG | 0.005 s | 15 | Sphere (1 per block) |
+
+Default on program start and after load: **Accurate** (index 0). The preset is
+**saved in the JSON chain file** (`"sim_preset": 0/1/2`) and restored on load.
+
+### 19.2 Dual-Geom Architecture
+
+Every rigid body in the compiled `mjModel` carries **two geoms**:
+
+1. **Visual box** (`contype=0, conaffinity=0`): rendered as a solid cube; excluded from all
+   contact detection.
+2. **Invisible contact sphere** (`contype=1, conaffinity=1, condim=1, rgba=0`):
+   `radius = half_block_size`; used for contact detection only; invisible in the viewport.
+
+This dual-geom pattern is set up in `AddBlockGeom` inside `chainmaker_compile.cpp`.
+Collision is always between spheres and the floor/other spheres; the visual cube
+shape is purely cosmetic.
+
+### 19.3 `ApplySimPreset()` — Runtime Switching
+
+`ApplySimPreset(AppState&)` (declared in `chainmaker_sim.h`) patches `m->opt` fields
+at runtime — **no recompile required**:
+
+```cpp
+// Writes directly into live mjModel::opt
+m->opt.solver     = kSimPresets[p].solver;    // mjSOL_NEWTON or mjSOL_CG
+m->opt.timestep   = kSimPresets[p].timestep;
+m->opt.iterations = kSimPresets[p].iterations;
+```
+
+For **Fast** mode it additionally sets:
+- `m->geom_contype[j] = 1` on all sphere geoms (enable contact)
+- `m->geom_contype[j] = 0` on all box geoms (disable contact)
+
+For **Accurate/Balanced** modes the logic is reversed: box geoms get `contype=1`,
+sphere geoms get `contype=0`.
+
+`ApplySimPreset()` is called:
+- By `EnterSimulation()` after `mj_makeData` — sets initial preset before first `mj_step`.
+- By `HandleUIClick()` immediately when the **Sim Speed** button is clicked (sim mode).
+- By the `set_sim_preset` IPC command.
+
+### 19.4 UI Implementation
+
+The **Sim Speed** button is a plain `mjITEM_BUTTON` with a dynamic label that includes
+the currently-active preset name (e.g. `"Sim Speed: Accurate"`). Using a button
+(not `mjITEM_SELECT`) avoids dropdown z-order rendering issues in MuJoCo's imgui layer.
+
+When clicked, `HandleUIClick` advances the preset index and sets `app.needs_ui_rebuild =
+true`. The main render loop checks this flag **before** `mjui_update`/`mjui_render` and
+calls `BuildUI()` to refresh the button label, then clears the flag.
+
+```
+User clicks "Sim Speed: Accurate"
+  → HandleUIClick: sim_preset = Balanced; needs_ui_rebuild = true
+  → (next frame) main loop: BuildUI() → button label → "Sim Speed: Balanced"
+```
+
+### 19.5 Profiler Overlay Location
+
+The simulation profiler overlay is rendered at **`mjGRID_BOTTOMLEFT`** to avoid
+overlapping the right-side UI panel. Two modes (toggled with **P** key):
+
+| Mode | Location | Content |
+|------|----------|---------|
+| Compact (default) | Bottom-left | One-liner: step ms, contacts, RT ratio, recording tag |
+| Full (P key) | Bottom-left | Per-category breakdown: collision %, solver %, step %, RT ratio, preset name |
+
+## 20. Scope Status
 
 | Phase | Status | Description |
 |-------|--------|-------------|
@@ -3150,7 +3230,7 @@ Windows uses `_popen`/`_pclose`; POSIX uses `popen`/`pclose`. The file
 
 ---
 
-## 20. Known Requirements & Invariants
+## 21. Known Requirements & Invariants
 
 This section captures correctness requirements that are easy to accidentally violate.
 

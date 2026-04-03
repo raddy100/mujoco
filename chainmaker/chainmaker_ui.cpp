@@ -1,7 +1,6 @@
 #include "chainmaker_ui.h"
 #include "chainmaker_io.h"
 #include "chainmaker_sim.h"
-
 #include <cstdio>
 #include <cstring>
 #include <iostream>
@@ -19,6 +18,15 @@ static const char* kBtnNewChain = "New Chain (N)";
 static const char* kBtnSave     = "Save (Ctrl+S)";
 static const char* kBtnLoad     = "Load (Ctrl+L)";
 static const char* kBtnSimulate = "Simulate (P)";
+
+// Sim Speed button prefix — used for identification in HandleUIClick
+static const char* kBtnSimSpeedPrefix = "Sim Speed: ";
+
+static const char* kSimSpeedLabels[kNumSimPresets] = {
+    "Sim Speed: Accurate",  // 0 — Newton + box
+    "Sim Speed: Balanced",  // 1 — CG + box
+    "Sim Speed: Fast",      // 2 — CG + sphere
+};
 
 // ---------------------------------------------------------------------------
 // BuildUI
@@ -86,6 +94,14 @@ void BuildUI(AppState& app) {
     std::snprintf(def[di].other, sizeof(def[di].other), "0.00 0.50");
     di++;
 
+    // Sim speed preset — cycling button: click to cycle Accurate → Balanced → Fast → …
+    // Label includes current preset name so user always sees active setting.
+    {
+        int p = static_cast<int>(app.world.sim_preset);
+        if (p < 0 || p >= kNumSimPresets) p = 0;
+        addButton(kSimSpeedLabels[p]);
+    }
+
     // Separator
     clearDef(); def[di].type = mjITEM_SEPARATOR; di++;
 
@@ -131,6 +147,18 @@ void SetupUIRect(AppState& app, mjrRect viewport) {
 void HandleUIClick(AppState& app, mjuiItem* item, int glfw_action) {
     if (glfw_action != GLFW_PRESS) return;
     if (item->type != mjITEM_BUTTON) return;
+
+    // Sim Speed cycling button: advance to next preset, rebuild UI next frame
+    if (std::strncmp(item->name, kBtnSimSpeedPrefix,
+                     std::strlen(kBtnSimSpeedPrefix)) == 0) {
+        int next = (static_cast<int>(app.world.sim_preset) + 1) % kNumSimPresets;
+        app.world.sim_preset = static_cast<SimPreset>(next);
+        if (app.mode == AppMode::SIMULATE) {
+            ApplySimPreset(app);
+        }
+        app.needs_ui_rebuild = true;  // button label updates on next frame
+        return;
+    }
 
     if (std::strcmp(item->name, kBtnPlace) == 0) {
         PlaceBlock(app.world);

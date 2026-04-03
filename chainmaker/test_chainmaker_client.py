@@ -187,8 +187,18 @@ class ChainMakerClient:
     def get_profiler(self) -> Dict:
         """Return per-step timer values (ms) from MuJoCo d->timer[].
         Only valid in SIMULATE mode. Fields: step_ms, collision_ms, solver_ms,
-        kinematics_ms, inertia_ms, ncon, nbody, nv, iterations."""
+        kinematics_ms, inertia_ms, ncon, nbody, nv, iterations,
+        sim_preset (int), sim_preset_label (str)."""
         return self._send({"cmd": "get_profiler"})
+
+    def set_sim_preset(self, preset: int) -> Dict:
+        """Set the simulation speed/accuracy preset.
+        0 = Accurate (Newton + box, slowest, most accurate)
+        1 = Balanced (CG + box, ~5x faster, same geometry)
+        2 = Fast     (CG + sphere, ~11x faster, inscribed sphere)
+        If simulation is running, applies immediately. Safe to call in build mode
+        (stores the preference, applied when simulation starts)."""
+        return self._send({"cmd": "set_sim_preset", "preset": preset})
 
     def start_recording(self, path: str = "") -> Dict:
         """Start recording video to an MP4 file via ffmpeg.

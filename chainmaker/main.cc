@@ -182,6 +182,14 @@ int main(int argc, const char** argv) {
             PopulateBuildScene(g_app);
         }
 
+        // Rebuild UI if a button changed the preset label (deferred to avoid
+        // modifying app.ui while mjui_event is still processing the click).
+        if (g_app.needs_ui_rebuild) {
+            BuildUI(g_app);
+            g_app.needs_ui_rebuild = false;
+            SetupUIRect(g_app, viewport);
+        }
+
         // Update UI layout for this frame; resize recomputes item bounding boxes
         // so mjui_event hit-testing works correctly after window resize.
         SetupUIRect(g_app, viewport);

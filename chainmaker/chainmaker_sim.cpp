@@ -31,6 +31,63 @@ static mjtNum ChainmakerTimer() {
 static double g_rt_ratio = 0.0;   // physics_time / wall_time  (1.0 = real-time)
 
 // ---------------------------------------------------------------------------
+// Preset parameter table
+// ---------------------------------------------------------------------------
+
+struct PresetParams {
+    int         solver;       // mjtSolver
+    double      timestep;
+    int         iterations;
+    bool        use_sphere;   // true = sphere collision, false = box collision
+    const char* label;
+};
+
+static const PresetParams kSimPresets[kNumSimPresets] = {
+    { mjSOL_NEWTON, 0.002, 50, false, "Accurate" },  // stiff contacts need more iterations
+    { mjSOL_CG,     0.003, 25, false, "Balanced" },  // box corners, CG ~5x faster
+    { mjSOL_CG,     0.005, 20, true,  "Fast"     },  // sphere, CG ~11x faster
+};
+
+// ---------------------------------------------------------------------------
+// ApplySimPreset
+// ---------------------------------------------------------------------------
+
+void ApplySimPreset(AppState& app) {
+    mjModel* m = app.sim_model;
+    if (!m) return;
+
+    int p = static_cast<int>(app.world.sim_preset);
+    if (p < 0 || p >= kNumSimPresets) p = 0;
+    const PresetParams& pr = kSimPresets[p];
+
+    // Patch solver options — take effect on next mj_step
+    m->opt.solver     = pr.solver;
+    m->opt.timestep   = pr.timestep;
+    m->opt.iterations = pr.iterations;
+
+    // Toggle collision roles between the two geoms on each chain body.
+    // Body 0 is the worldbody (floor plane) — leave it untouched.
+    // geom_type[j] == mjGEOM_BOX    → visual box: enable collision when !use_sphere
+    // geom_type[j] == mjGEOM_SPHERE → contact sphere: enable collision when use_sphere
+    for (int j = 0; j < m->ngeom; j++) {
+        if (m->geom_bodyid[j] == 0) continue;
+        if (m->geom_type[j] == mjGEOM_BOX) {
+            m->geom_contype[j]     = pr.use_sphere ? 0 : 1;
+            m->geom_conaffinity[j] = pr.use_sphere ? 0 : 1;
+        } else if (m->geom_type[j] == mjGEOM_SPHERE) {
+            m->geom_contype[j]     = pr.use_sphere ? 1 : 0;
+            m->geom_conaffinity[j] = pr.use_sphere ? 1 : 0;
+        }
+    }
+
+    std::cout << "SimPreset: " << pr.label
+              << "  solver=" << (pr.solver == mjSOL_CG ? "CG" : "Newton")
+              << "  dt=" << pr.timestep
+              << "  itr=" << pr.iterations
+              << "  geom=" << (pr.use_sphere ? "sphere" : "box") << "\n";
+}
+
+// ---------------------------------------------------------------------------
 // EnterSimulation
 // ---------------------------------------------------------------------------
 
@@ -55,6 +112,11 @@ void EnterSimulation(AppState& app) {
     app.sim_data  = res.data;
     app.mode      = AppMode::SIMULATE;
     g_rt_ratio    = 0.0;
+
+    // Apply the user's chosen speed/accuracy preset to the freshly compiled model.
+    // CompileWorld always bakes in both geom types; ApplySimPreset activates the
+    // correct one and patches the solver options.
+    ApplySimPreset(app);
 
     // Install profiling timer (must be set BEFORE any mj_step calls)
     mjcb_time = ChainmakerTimer;
@@ -183,9 +245,12 @@ void RenderProfilerOverlay(const AppState& app, mjrRect viewport) {
 
     if (app.show_profiler) {
         // Full breakdown
+        int p = static_cast<int>(app.world.sim_preset);
+        if (p < 0 || p >= kNumSimPresets) p = 0;
         char buf[768];
         std::snprintf(buf, sizeof(buf),
             "--- Profiler -------------------\n"
+            "Preset     : %s\n"
             "Step total : %6.2f ms%s\n"
             "  Collision: %6.2f ms  (%3.0f%%)\n"
             "  Solver   : %6.2f ms  (%3.0f%%)\n"
@@ -197,6 +262,7 @@ void RenderProfilerOverlay(const AppState& app, mjrRect viewport) {
             "Arena/Stack: %llu / %llu\n"
             "Recording  : %s\n"
             "--------------------------------",
+            kSimPresets[p].label,
             step_ms, perf_warn,
             col_ms,   step_ms > 0 ? 100.0 * col_ms   / step_ms : 0.0,
             sol_ms,   step_ms > 0 ? 100.0 * sol_ms   / step_ms : 0.0,
@@ -207,7 +273,7 @@ void RenderProfilerOverlay(const AppState& app, mjrRect viewport) {
             g_rt_ratio, perf_warn,
             (unsigned long long)d->maxuse_arena, (unsigned long long)d->maxuse_stack,
             app.is_recording ? app.record_path : "OFF");
-        mjr_overlay(mjFONT_NORMAL, mjGRID_TOPRIGHT, viewport, buf, NULL,
+        mjr_overlay(mjFONT_NORMAL, mjGRID_TOPLEFT, viewport, buf, NULL,
                     const_cast<mjrContext*>(&app.con));
     } else {
         // Compact one-liner (always visible in sim mode)
@@ -215,7 +281,7 @@ void RenderProfilerOverlay(const AppState& app, mjrRect viewport) {
         std::snprintf(buf, sizeof(buf),
             "Step:%.1fms  Con:%d  RT:%.2fx%s%s  P=profiler  R=exit",
             step_ms, d->ncon, g_rt_ratio, perf_warn, rec_tag);
-        mjr_overlay(mjFONT_NORMAL, mjGRID_TOPRIGHT, viewport, buf, NULL,
+        mjr_overlay(mjFONT_NORMAL, mjGRID_TOPLEFT, viewport, buf, NULL,
                     const_cast<mjrContext*>(&app.con));
     }
 }
