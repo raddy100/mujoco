@@ -9,6 +9,8 @@
 *.o
 *.so
 *.so.*
+*.png
+*.ppm
 
 # Exclude editor config
 .vscode/

@@ -1,0 +1,420 @@
+{
+  "version": 1,
+  "bead_size": 0.05,
+  "gap_ratio": 0.05,
+  "chains": [
+    {
+      "id": 0,
+      "name": "Chain A",
+      "color": [
+        0.2,
+        0.6,
+        1.0,
+        1.0
+      ],
+      "head_direction": 0,
+      "blocks": [
+        {
+          "pos": [
+            0,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            1,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            2,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            3,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            4,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            5,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            6,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            7,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            8,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            9,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            10,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            11,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            12,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            13,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            14,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            15,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            16,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            17,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            18,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            19,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            20,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            21,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            22,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            23,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            24,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            25,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            26,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            27,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            28,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            29,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            30,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            31,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            32,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            33,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            34,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            35,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            36,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            37,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            38,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        },
+        {
+          "pos": [
+            39,
+            0,
+            0
+          ],
+          "is_turn": false,
+          "turn_entry_axis": -1,
+          "turn_exit_axis": -1
+        }
+      ]
+    }
+  ]
+}

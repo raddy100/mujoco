@@ -229,6 +229,10 @@ if(PROGUI)
   add_subdirectory(progui)
 endif()
 
+if(CHAINMAKER)
+  add_subdirectory(chainmaker)
+endif()
+
 
 if(MUJOCO_WITH_USD)
   include(third_party_deps/openusd)
