@@ -40,12 +40,17 @@ struct PresetParams {
     int         iterations;
     bool        use_sphere;   // true = sphere collision, false = box collision
     const char* label;
+    // Per-preset contact stiffness — solref[0] must be >= 2*timestep for stability
+    double      solref0;      // contact time constant (smaller = stiffer)
+    double      solref1;      // damping ratio (>1 = overdamped, no bounce)
+    double      solimp_dmax;  // max impedance (closer to 1.0 = less penetration)
 };
 
 static const PresetParams kSimPresets[kNumSimPresets] = {
-    { mjSOL_NEWTON, 0.002, 50, false, "Accurate" },  // stiff contacts need more iterations
-    { mjSOL_CG,     0.003, 25, false, "Balanced" },  // box corners, CG ~5x faster
-    { mjSOL_CG,     0.005, 20, true,  "Fast"     },  // sphere, CG ~11x faster
+    //           solver       dt      itr  sphere  label       solref0  solref1  dmax
+    { mjSOL_NEWTON, 0.002,   50, false, "Accurate", 0.005,   2.0,     0.999 },
+    { mjSOL_CG,     0.003,   25, false, "Balanced", 0.010,   1.5,     0.99  },
+    { mjSOL_CG,     0.005,   20, true,  "Fast",     0.020,   1.0,     0.95  },
 };
 
 // ---------------------------------------------------------------------------
@@ -65,7 +70,8 @@ void ApplySimPreset(AppState& app) {
     m->opt.timestep   = pr.timestep;
     m->opt.iterations = pr.iterations;
 
-    // Toggle collision roles between the two geoms on each chain body.
+    // Toggle collision roles between the two geoms on each chain body, and
+    // apply per-preset contact stiffness (solref/solimp).
     // Body 0 is the worldbody (floor plane) — leave it untouched.
     // geom_type[j] == mjGEOM_BOX    → visual box: enable collision when !use_sphere
     // geom_type[j] == mjGEOM_SPHERE → contact sphere: enable collision when use_sphere
@@ -78,13 +84,23 @@ void ApplySimPreset(AppState& app) {
             m->geom_contype[j]     = pr.use_sphere ? 1 : 0;
             m->geom_conaffinity[j] = pr.use_sphere ? 1 : 0;
         }
+        // Apply per-preset contact stiffness to ALL non-floor geoms.
+        // solref[0] must be >= 2*timestep for stability (Fast: 0.020 >= 2*0.005 ✓)
+        m->geom_solref[j*2 + 0] = (float)pr.solref0;
+        m->geom_solref[j*2 + 1] = (float)pr.solref1;
+        m->geom_solimp[j*5 + 0] = 0.9f;
+        m->geom_solimp[j*5 + 1] = (float)pr.solimp_dmax;
+        m->geom_solimp[j*5 + 2] = 0.001f;
+        m->geom_solimp[j*5 + 3] = 0.5f;
+        m->geom_solimp[j*5 + 4] = 2.0f;
     }
 
     std::cout << "SimPreset: " << pr.label
               << "  solver=" << (pr.solver == mjSOL_CG ? "CG" : "Newton")
               << "  dt=" << pr.timestep
               << "  itr=" << pr.iterations
-              << "  geom=" << (pr.use_sphere ? "sphere" : "box") << "\n";
+              << "  geom=" << (pr.use_sphere ? "sphere" : "box")
+              << "  solref0=" << pr.solref0 << "\n";
 }
 
 // ---------------------------------------------------------------------------

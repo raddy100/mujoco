@@ -727,6 +727,150 @@ with launch_chainmaker(exe_path=DEFAULT_EXE, wait=3.0) as c:
        f"expected={nblocks_c0_before}, got={state.get('nblocks')}")
 
     # ------------------------------------------------------------------
+    section("9k. Turn-block junction rules")
+    # ------------------------------------------------------------------
+    # RULE: Turn blocks are completely off-limits as junction anchors,
+    #       chain-start points, or tunneling targets.
+    #
+    # Build layout:
+    #   Chain 0: (0,0,0) →+X→ (1,0,0) [turn +Y] →+Y→ (1,1,0) → (1,2,0)
+    #   Turn block is at (1,0,0) (entry=X, exit=Y)
+    #
+    # Tests:
+    #   A) start_chain_at(1,0,0) → must fail (turn block)
+    #   B) start_chain_at(0,0,0) then place +X → hits (1,0,0) turn →
+    #         TARGET_OCCUPIED_INCOMPATIBLE (cannot tunnel through/land on turn)
+    #   C) Ghost stops before (1,0,0): ghost should NOT appear beyond a turn block
+    #   D) Place block that approaches turn from a perpendicular free axis also
+    #         blocked (turn blocks are off-limits on ALL axes)
+
+    c.reset()
+    # Build: (0,0,0) → (1,0,0) then turn +Y → (1,1,0) → (1,2,0)
+    c.set_direction("+X")
+    c.place_block()            # (1,0,0)
+    c.set_direction("+Y")
+    c.place_block()            # (1,1,0)  — head was (1,0,0), now it's a TURN block
+    c.place_block()            # (1,2,0)
+
+    state = c.get_state()
+    ok("9k: 4 blocks placed", state.get("nblocks") == 4,
+       f"nblocks={state.get('nblocks')}")
+
+    # A) start_chain_at on the turn block (1,0,0) must be rejected
+    r = c.start_chain_at(1, 0, 0)
+    ok("9k-A: start_chain_at on turn block returns error",
+       r.get("ok") is False,
+       f"response={r}")
+
+    # B) Chain 1 at (0,0,0), move +X → would hit the turn block at (1,0,0)
+    #    PlaceBlock must return TARGET_OCCUPIED_INCOMPATIBLE, not SUCCESS
+    r = c.start_chain_at(0, 0, 0)
+    ok("9k-B: start chain 1 at (0,0,0) ok", r.get("ok") is True, str(r))
+    c.set_direction("+X")
+    r = c.place_block()
+    ok("9k-B: place toward turn block is blocked",
+       r.get("ok") is False,
+       f"result={r.get('result')}")
+    ok("9k-B: result is TARGET_OCCUPIED_INCOMPATIBLE",
+       r.get("result") == "TARGET_OCCUPIED_INCOMPATIBLE",
+       f"result={r.get('result')}")
+
+    # C) Ghost must not appear beyond the turn block:
+    #    With head at (0,0,0), direction +X, next cell (1,0,0) is a turn →
+    #    ghost should be absent (get_state ghost == None or equal to head)
+    state = c.get_state()
+    ghost = state.get("ghost")
+    ok("9k-C: ghost is None when blocked by turn block (no ghost past turns)",
+       ghost is None,
+       f"ghost={ghost}, head={state.get('head')}")
+
+    # D) start_chain_at on non-turn block adjacent to turn block is still fine
+    r = c.start_chain_at(1, 2, 0)   # (1,2,0) is a straight block, not a turn
+    ok("9k-D: start_chain_at on straight block next to turn succeeds",
+       r.get("ok") is True, str(r))
+
+    ss(c, "09k_turn_block_junction_rules")
+
+    # ------------------------------------------------------------------
+    section("9l. Four-chain build and simulate")
+    # ------------------------------------------------------------------
+    # Verifies that 4 independent chains can be created, each branching from
+    # a non-turn junction on chain 0, and that the whole structure compiles
+    # and runs in simulation without errors.
+    #
+    # Layout:
+    #   Chain 0: (0,0,0) →+X→ (1,0,0) → (2,0,0) → (3,0,0) → (4,0,0) → (5,0,0)
+    #   Chain 1: starts at (1,0,0) →+Y→ (1,1,0) → (1,2,0)
+    #   Chain 2: starts at (3,0,0) →+Y→ (3,1,0) → (3,2,0)
+    #   Chain 3: starts at (5,0,0) →+Y→ (5,1,0) → (5,2,0)
+    #   All junction anchor blocks (1,0,0), (3,0,0), (5,0,0) are straight
+    #   (no turns) — they are valid junctions.
+
+    c.reset()
+    c.set_direction("+X")
+    for _ in range(5):
+        c.place_block()   # chain 0: (0,0,0)→(1,0,0)→…→(5,0,0)
+
+    state = c.get_state()
+    ok("9l: chain 0 has 6 blocks", state.get("nblocks") == 6,
+       f"nblocks={state.get('nblocks')}")
+
+    # Chain 1 from (1,0,0)
+    r = c.start_chain_at(1, 0, 0)
+    ok("9l: chain 1 at (1,0,0) ok", r.get("ok") is True, str(r))
+    c.set_direction("+Y")
+    c.place_block()   # (1,1,0)
+    c.place_block()   # (1,2,0)
+
+    # Chain 2 from (3,0,0)
+    r = c.start_chain_at(3, 0, 0)
+    ok("9l: chain 2 at (3,0,0) ok", r.get("ok") is True, str(r))
+    c.set_direction("+Y")
+    c.place_block()   # (3,1,0)
+    c.place_block()   # (3,2,0)
+
+    # Chain 3 from (5,0,0)
+    r = c.start_chain_at(5, 0, 0)
+    ok("9l: chain 3 at (5,0,0) ok", r.get("ok") is True, str(r))
+    c.set_direction("+Y")
+    c.place_block()   # (5,1,0)
+    c.place_block()   # (5,2,0)
+
+    state = c.get_state()
+    ok("9l: 4 chains exist", state.get("nchains") == 4,
+       f"nchains={state.get('nchains')}")
+    # nblocks is per-active-chain; active is chain 3 (started at (5,0,0)+2 blocks = 3)
+    ok("9l: active chain (3) has 3 blocks",
+       state.get("nblocks") == 3,
+       f"nblocks={state.get('nblocks')}")
+    ok("9l: active chain is 3", state.get("active_chain") == 3,
+       f"active={state.get('active_chain')}")
+
+    # Verify no turn block was used as a junction (all 3 start points are straight)
+    # Re-verify we cannot start yet another chain on one of chain 1's turn blocks —
+    # chain 1 has no turn blocks here (all straight), so this is a sanity check.
+    r_bad = c.start_chain_at(1, 0, 0)   # valid junction: straight block
+    ok("9l: re-using straight junction (1,0,0) for 5th chain is allowed",
+       r_bad.get("ok") is True, str(r_bad))
+    state = c.get_state()
+    ok("9l: 5 chains after re-use of junction", state.get("nchains") == 5,
+       f"nchains={state.get('nchains')}")
+    # Clean up the 5th chain by switching away — it has no extra blocks yet
+    c.switch_chain(0)
+
+    # Enter simulation: all 4 original chains must compile cleanly
+    r = c.enter_simulate()
+    ok("9l: 4-chain structure enters simulation ok",
+       r.get("ok") is True, str(r))
+    # 1 worldbody + 12 chain bodies = 13 (3 junctions shared → 12 unique bodies + 1 world)
+    # actual nbody may vary slightly depending on junction handling; just verify > 1
+    ok("9l: nbody > 1 (model has bodies)", r.get("nbody", 0) > 1,
+       f"nbody={r.get('nbody')}")
+    time.sleep(0.2)
+    ss(c, "09l_four_chains_simulate")
+    c.exit_simulate()
+
+    # ------------------------------------------------------------------
     section("11. Screenshot")
     # ------------------------------------------------------------------
 

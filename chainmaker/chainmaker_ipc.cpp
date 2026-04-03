@@ -141,13 +141,21 @@ static json BuildStateJson(const AppState& app) {
             IVec3 h = active->Head();
             s["head"] = {{"x", h.x}, {"y", h.y}, {"z", h.z}};
 
-            // Ghost position (accounts for intersection skip)
+            // Ghost position (accounts for intersection skip and turn-block blocking)
             IVec3 offset    = FaceToOffset(active->head_direction);
             IVec3 ghost_pos = h + offset;
-            if (app.world.grid.count(ghost_pos))
+            bool ghost_blocked = false;
+            while (app.world.grid.count(ghost_pos)) {
+                const GridCell& cell = app.world.grid.at(ghost_pos);
+                if (cell.is_turn) { ghost_blocked = true; break; }
                 ghost_pos = ghost_pos + offset;
-            s["ghost"] = {{"x", ghost_pos.x}, {"y", ghost_pos.y},
-                          {"z", ghost_pos.z}};
+            }
+            if (ghost_blocked) {
+                s["ghost"] = nullptr;
+            } else {
+                s["ghost"] = {{"x", ghost_pos.x}, {"y", ghost_pos.y},
+                              {"z", ghost_pos.z}};
+            }
         }
         s["direction"] = FaceName(active->head_direction);
     } else {

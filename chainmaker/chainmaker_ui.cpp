@@ -470,12 +470,19 @@ void MouseMoveCallback(GLFWwindow* window, double xpos, double ypos) {
     app.mouse_lastx = xfb;
     app.mouse_lasty = yfb;
 
-    // Hover tracking for NEW_CHAIN_PICK — runs even without mouse buttons held
+    // Hover tracking for NEW_CHAIN_PICK — runs even without mouse buttons held.
+    // Turn blocks are off-limits as junction anchors: don't highlight them.
     if (app.mode == AppMode::NEW_CHAIN_PICK && !app.junction_picked) {
         IVec3 hit;
         if (RayPickBlock(app, xfb, yfb, fbw, fbh, hit)) {
-            app.hovered_block = hit;
-            app.block_hovered = true;
+            auto it = app.world.grid.find(hit);
+            bool is_turn = (it != app.world.grid.end() && it->second.is_turn);
+            if (!is_turn) {
+                app.hovered_block = hit;
+                app.block_hovered = true;
+            } else {
+                app.block_hovered = false;
+            }
         } else {
             app.block_hovered = false;
         }

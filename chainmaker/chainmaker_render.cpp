@@ -169,12 +169,18 @@ void AddGhostGeom(mjvScene& scn, const ChainWorld& world, const Chain& chain) {
     IVec3 offset    = FaceToOffset(chain.head_direction);
     IVec3 ghost_pos = chain.Head() + offset;
 
-    // Skip through any already-occupied cells so the ghost shows the actual
+    // Skip through already-occupied cells so the ghost shows the actual
     // placement position (handles double/triple junction scenarios).
+    // RULE: turn blocks are completely off-limits — stop immediately and
+    //       show no ghost if a turn block is in the path.
     int max_skip = 20;
     while (world.grid.count(ghost_pos) > 0 && max_skip-- > 0) {
+        const GridCell& cell = world.grid.at(ghost_pos);
+        if (cell.is_turn) return;   // silent: no ghost beyond a turn block
         ghost_pos = ghost_pos + offset;
     }
+    // If we exhausted the skip limit and still hit occupied cells, no ghost
+    if (world.grid.count(ghost_pos) > 0) return;
     mjtNum wpos[3];
     world.GridToWorld(ghost_pos, wpos);
 
